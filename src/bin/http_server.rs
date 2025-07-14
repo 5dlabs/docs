@@ -769,7 +769,7 @@ impl McpHandler {
 
             // Validate inputs
             let validation_result = self.validate_crate_spec(&crate_spec).await;
-            
+
             match validation_result {
                 Ok(_) => {
                     // Create config
@@ -863,7 +863,10 @@ impl McpHandler {
         };
 
         let message = if failed_count == 0 {
-            format!("Successfully configured {} crates, ingestion started", successful_count)
+            format!(
+                "Successfully configured {} crates, ingestion started",
+                successful_count
+            )
         } else if successful_count == 0 {
             format!("Failed to configure any crates ({} errors)", failed_count)
         } else {
@@ -892,7 +895,9 @@ impl McpHandler {
             return Err("Crate name cannot be empty".to_string());
         }
 
-        if crate_spec.version_spec != "latest" && !crate_spec.version_spec.chars().any(|c| c.is_numeric()) {
+        if crate_spec.version_spec != "latest"
+            && !crate_spec.version_spec.chars().any(|c| c.is_numeric())
+        {
             return Err("Version spec must be 'latest' or a valid version number".to_string());
         }
 
@@ -999,10 +1004,13 @@ async fn main() -> Result<(), ServerError> {
 
             tokio::task::spawn(async move {
                 if let Err(err) = Builder::new(TokioExecutor::new())
-                    .serve_connection(io, service_fn(move |req| {
-                        let handler = handler.clone();
-                        async move { handler(req) }
-                    }))
+                    .serve_connection(
+                        io,
+                        service_fn(move |req| {
+                            let handler = handler.clone();
+                            async move { handler(req) }
+                        }),
+                    )
                     .await
                 {
                     tracing::error!("Health server connection error: {}", err);
