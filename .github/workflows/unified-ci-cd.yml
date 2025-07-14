@@ -476,9 +476,6 @@ jobs:
           mv backfill_versions x86_64/
           ls -la *
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
