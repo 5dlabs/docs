@@ -777,7 +777,10 @@ async fn main() -> Result<(), ServerError> {
 
             tokio::task::spawn(async move {
                 if let Err(err) = Builder::new(TokioExecutor::new())
-                    .serve_connection(io, service_fn(move |req| async move { handler(req) }))
+                    .serve_connection(io, service_fn(move |req| {
+                        let handler = handler.clone();
+                        async move { handler(req) }
+                    }))
                     .await
                 {
                     tracing::error!("Health server connection error: {}", err);
