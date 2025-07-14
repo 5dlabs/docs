@@ -476,7 +476,11 @@ impl McpHandler {
                 // Create a population job
                 let _ = self.database.create_population_job(saved_config.id).await;
 
-                // Spawn background population task (non-blocking)
+                // Return response immediately
+                let response = "Ingestion has started".to_string();
+                let result = Ok(CallToolResult::success(vec![Content::text(response)]));
+
+                // Spawn background population task after returning response
                 let crate_name = args.crate_name.clone();
                 let features = saved_config.features.clone();
                 let handler_clone = self.clone();
@@ -493,8 +497,7 @@ impl McpHandler {
                     }
                 });
 
-                let response = "Ingestion has started".to_string();
-                Ok(CallToolResult::success(vec![Content::text(response)]))
+                result
             }
             Err(e) => Err(McpError::internal_error(
                 format!("Failed to save crate configuration: {e}"),
