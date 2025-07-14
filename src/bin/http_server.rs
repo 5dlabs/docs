@@ -27,8 +27,9 @@ use std::{env, net::SocketAddr, sync::Arc, convert::Infallible};
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
-use hyper::{Request, Response, Body, Method, StatusCode, service::{make_service_fn, service_fn}};
-use hyper_util::rt::TokioIo;
+use hyper::{Request, Response, Method, StatusCode, service::service_fn};
+use hyper_util::rt::{TokioExecutor, TokioIo};
+use hyper_util::server::conn::auto::Builder;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about = "Rust documentation MCP server with HTTP SSE transport", long_about = None)]
@@ -655,20 +656,20 @@ impl McpHandler {
 }
 
 // Simple health check handler
-async fn health_handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
+async fn health_handler(req: Request<hyper::body::Incoming>) -> Result<Response<String>, Infallible> {
     match (req.method(), req.uri().path()) {
         (&Method::GET, "/health") => {
             let response = Response::builder()
                 .status(StatusCode::OK)
                 .header("Content-Type", "application/json")
-                .body(Body::from(r#"{"status":"healthy","service":"rustdocs-mcp-server"}"#))
+                .body(r#"{"status":"healthy","service":"rustdocs-mcp-server"}"#.to_string())
                 .unwrap();
             Ok(response)
         }
         _ => {
             let response = Response::builder()
                 .status(StatusCode::NOT_FOUND)
-                .body(Body::from("Not Found"))
+                .body("Not Found".to_string())
                 .unwrap();
             Ok(response)
         }
@@ -943,13 +944,19 @@ async fn main() -> Result<(), ServerError> {
 
     // Start health check server
     tokio::spawn(async move {
-        let make_svc = make_service_fn(|_conn| async {
-            Ok::<_, Infallible>(service_fn(health_handler))
-        });
-
-        let server = hyper::Server::bind(&health_addr).serve(make_svc);
-        if let Err(e) = server.await {
-            tracing::error!("Health server error: {}", e);
+        let listener = tokio::net::TcpListener::bind(health_addr).await.unwrap();
+        loop {
+            let (stream, _) = listener.accept().await.unwrap();
+            let io = TokioIo::new(stream);
+            
+            tokio::task::spawn(async move {
+                if let Err(err) = Builder::new(TokioExecutor::new())
+                    .serve_connection(io, service_fn(health_handler))
+                    .await
+                {
+                    tracing::error!("Health server connection error: {}", err);
+                }
+            });
         }
     });
 

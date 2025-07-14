@@ -2280,6 +2280,7 @@ dependencies = [
  "dotenvy",
  "futures",
  "hyper",
+ "hyper-util",
  "ndarray",
  "pgvector",
  "regex",
