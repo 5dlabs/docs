@@ -577,7 +577,7 @@ jobs:
             --namespace mcp \
             --create-namespace \
             --set image.tag=${{ needs.version.outputs.version }} \
-            --set env.OPENAI_API_KEY="${{ secrets.OPENAI_API_KEY }}" \
+            --set app.secrets.openaiApiKey="${{ secrets.OPENAI_API_KEY }}" \
             --set postgresql.enabled=true \
             --timeout 10m \
             --wait \
