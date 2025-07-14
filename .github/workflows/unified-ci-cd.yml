@@ -352,57 +352,87 @@ jobs:
           - target: aarch64-unknown-linux-gnu
             runner: [self-hosted, rust-builder]
             extension: ""
+          # Use GitHub-hosted runners for Apple targets to avoid conflicts
           - target: x86_64-apple-darwin
-            runner: [self-hosted, rust-builder]
+            runner: ubuntu-latest
             extension: ""
           - target: aarch64-apple-darwin
-            runner: [self-hosted, rust-builder]
+            runner: ubuntu-latest
             extension: ""
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup optimized Rust environment
+      - name: Setup Rust environment
         run: |
-          echo "🚀 Setting up ULTRA-OPTIMIZED Rust build environment..."
-
-          # Add cargo bin to PATH
-          echo "/home/runner/.cargo/bin" >> $GITHUB_PATH
-          export PATH="/home/runner/.cargo/bin:$PATH"
-
-          # Set up Rust toolchain
-          rustup default stable
-          rustup update stable
-
-          # Verify pre-installed tools
-          echo "🔍 Verifying pre-installed tools..."
-          rustc --version
-          cargo --version
-          sccache --version || echo "⚠️ sccache not found"
-          mold --version || echo "⚠️ mold not found"
-
-          # Show available resources
-          echo "💾 Available resources:"
-          echo "CPU cores: $(nproc)"
-          echo "Memory: $(free -h | grep '^Mem:' | awk '{print $2}')"
+          echo "🚀 Setting up Rust build environment..."
+          
+          # Handle different runner types
+          if [[ "${{ matrix.runner }}" == *"self-hosted"* ]]; then
+            echo "📦 Using self-hosted rust-builder runner"
+            # Add cargo bin to PATH for self-hosted runners
+            echo "/home/runner/.cargo/bin" >> $GITHUB_PATH
+            export PATH="/home/runner/.cargo/bin:$PATH"
+            
+            # Set up Rust toolchain
+            rustup default stable
+            rustup update stable
+            
+            # Verify pre-installed tools
+            echo "🔍 Verifying pre-installed tools..."
+            rustc --version
+            cargo --version
+            sccache --version || echo "⚠️ sccache not found"
+            mold --version || echo "⚠️ mold not found"
+            
+            # Show available resources
+            echo "💾 Available resources:"
+            echo "CPU cores: $(nproc)"
+            echo "Memory: $(free -h | grep '^Mem:' | awk '{print $2}')"
+          else
+            echo "☁️ Using GitHub-hosted runner"
+            # Install Rust on GitHub-hosted runners
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+            source ~/.cargo/env
+            echo "~/.cargo/bin" >> $GITHUB_PATH
+            export PATH="~/.cargo/bin:$PATH"
+            
+            rustup default stable
+            rustup update stable
+            echo "Rust version: $(rustc --version)"
+          fi
 
       - name: Setup cross-compilation tools
         if: matrix.target != 'x86_64-unknown-linux-gnu'
         run: |
           echo "🔧 Setting up cross-compilation for ${{ matrix.target }}..."
+          
+          # Remove existing target first to avoid conflicts
+          rustup target remove ${{ matrix.target }} || true
+          
+          # Add target
           rustup target add ${{ matrix.target }}
           
           # Install cross-compilation tools if needed
           if [[ "${{ matrix.target }}" == *"apple-darwin"* ]]; then
             echo "🍎 macOS cross-compilation support needed"
-            # TODO: Add osxcross setup if available on runners
+            # For GitHub-hosted runners, we may need additional tools
+            if [[ "${{ matrix.runner }}" == "ubuntu-latest" ]]; then
+              echo "Installing cross-compilation dependencies..."
+              # Cross-compilation will work with just the target for simple binaries
+            fi
           elif [[ "${{ matrix.target }}" == "aarch64-unknown-linux-gnu" ]]; then
             echo "🔧 ARM64 Linux cross-compilation"
-            # Should work with rustup target add
+            # Install cross-compilation tools for ARM64 if on GitHub-hosted
+            if [[ "${{ matrix.runner }}" == "ubuntu-latest" ]]; then
+              sudo apt-get update
+              sudo apt-get install -y gcc-aarch64-linux-gnu
+            fi
           fi
 
       - name: Setup sccache
+        if: contains(matrix.runner, 'self-hosted')
         run: |
           echo "🗄️ Setting up sccache..."
           export SCCACHE_CACHE_SIZE="50G"
@@ -419,10 +449,16 @@ jobs:
       - name: Build binaries
         env:
           CARGO_INCREMENTAL: "0"
-          RUSTC_WRAPPER: sccache
-          CARGO_TARGET_DIR: /cache/target
+          RUSTC_WRAPPER: ${{ contains(matrix.runner, 'self-hosted') && 'sccache' || '' }}
+          CARGO_TARGET_DIR: ${{ contains(matrix.runner, 'self-hosted') && '/cache/target' || 'target' }}
         run: |
           echo "🏗️ Building for ${{ matrix.target }}..."
+          
+          # Set cross-compilation environment for ARM64 Linux
+          if [[ "${{ matrix.target }}" == "aarch64-unknown-linux-gnu" && "${{ matrix.runner }}" == "ubuntu-latest" ]]; then
+            export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc
+            export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+          fi
 
           # Build all binaries
           cargo build --release --target ${{ matrix.target }} \
@@ -615,9 +651,99 @@ jobs:
           echo "Cluster status:"
           kubectl get pods -n mcp -o wide
 
-  # Create release (only for tags)
+  # Automatic versioning and tagging (only on main branch)
+  auto-version:
+    needs: [version, build-binaries, test-helm]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      new-tag: ${{ steps.version.outputs.new-tag }}
+      should-release: ${{ steps.version.outputs.should-release }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Determine next version
+        id: version
+        run: |
+          # Get the latest tag
+          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          echo "Latest tag: $LATEST_TAG"
+          
+          # Parse version numbers
+          VERSION=${LATEST_TAG#v}
+          IFS='.' read -r -a VERSION_PARTS <<< "$VERSION"
+          MAJOR=${VERSION_PARTS[0]:-0}
+          MINOR=${VERSION_PARTS[1]:-0}
+          PATCH=${VERSION_PARTS[2]:-0}
+          
+          echo "Current version: $MAJOR.$MINOR.$PATCH"
+          
+          # Check commit messages since last tag to determine version bump
+          COMMITS_SINCE_TAG=$(git rev-list ${LATEST_TAG}..HEAD --count 2>/dev/null || git rev-list HEAD --count)
+          echo "Commits since last tag: $COMMITS_SINCE_TAG"
+          
+          if [ "$COMMITS_SINCE_TAG" -eq 0 ]; then
+            echo "No new commits, skipping release"
+            echo "should-release=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          # Get commit messages since last tag
+          COMMIT_MESSAGES=$(git log ${LATEST_TAG}..HEAD --pretty=format:"%s" 2>/dev/null || git log HEAD --pretty=format:"%s")
+          
+          # Determine version bump based on commit messages
+          if echo "$COMMIT_MESSAGES" | grep -qE "BREAKING CHANGE|!:|^[a-z]+!:"; then
+            # Major version bump for breaking changes
+            MAJOR=$((MAJOR + 1))
+            MINOR=0
+            PATCH=0
+            echo "🚨 Major version bump detected (breaking changes)"
+          elif echo "$COMMIT_MESSAGES" | grep -qE "^feat:|^feature:"; then
+            # Minor version bump for new features
+            MINOR=$((MINOR + 1))
+            PATCH=0
+            echo "✨ Minor version bump detected (new features)"
+          else
+            # Patch version bump for everything else
+            PATCH=$((PATCH + 1))
+            echo "🔧 Patch version bump detected (bug fixes/improvements)"
+          fi
+          
+          NEW_TAG="v$MAJOR.$MINOR.$PATCH"
+          echo "New version: $NEW_TAG"
+          echo "new-tag=$NEW_TAG" >> $GITHUB_OUTPUT
+          echo "should-release=true" >> $GITHUB_OUTPUT
+
+      - name: Create and push tag
+        if: steps.version.outputs.should-release == 'true'
+        run: |
+          NEW_TAG="${{ steps.version.outputs.new-tag }}"
+          echo "🏷️ Creating tag: $NEW_TAG"
+          
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          
+          # Create annotated tag with commit summary
+          COMMIT_SUMMARY=$(git log -1 --pretty=format:"%s")
+          git tag -a "$NEW_TAG" -m "Release $NEW_TAG
+
+          Automatic release created by CI/CD pipeline.
+          
+          Latest commit: $COMMIT_SUMMARY
+          
+          🤖 Generated with GitHub Actions"
+          
+          git push origin "$NEW_TAG"
+          echo "✅ Tag $NEW_TAG created and pushed"
+
+  # Create release (triggered by tags)
   release:
-    needs: [version, deploy, build-binaries]
+    needs: [version, build-binaries]
     if: needs.version.outputs.is-release == 'true'
     runs-on: [self-hosted, rust-builder]
     permissions:
