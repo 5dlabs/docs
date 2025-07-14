@@ -112,7 +112,7 @@ volumeMounts: []
 
 # Node selection for cluster deployment
 # Option 1: Use worker node when available
-nodeSelector:
+nodeSelector: {}
   # Uncomment to prefer worker nodes (when talos-a43-ee1 is back online)
   # kubernetes.io/hostname: talos-a43-ee1
   
@@ -195,7 +195,7 @@ postgresql:
       storageClass: "local-path"
       size: 8Gi
     # Node selection and tolerations for PostgreSQL
-    nodeSelector:
+    nodeSelector: {}
       # Uncomment to prefer worker nodes (when talos-a43-ee1 is back online)
       # kubernetes.io/hostname: talos-a43-ee1
     tolerations:
