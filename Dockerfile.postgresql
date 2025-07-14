@@ -1,5 +1,6 @@
-# Custom PostgreSQL image with pgvector for Bitnami chart compatibility
+# Custom PostgreSQL image with pgvector for Bitnami chart compatibility  
 # This image bridges the gap between pgvector/pgvector and Bitnami's directory structure
+# Rebuilt after repo recreation to restore missing container package
 
 FROM pgvector/pgvector:pg16 AS pgvector-source
 FROM bitnami/postgresql:16.3.0-debian-12-r19

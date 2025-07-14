@@ -177,10 +177,12 @@ postgresql:
   global:
     storageClass: "local-path"
   image:
-    registry: "docker.io"
-    repository: "ankane/pgvector"
-    tag: "v0.5.1-pg16"
-    pullPolicy: "IfNotPresent"
+    registry: "ghcr.io"
+    repository: "5dlabs/rust-docs-postgresql"
+    tag: "pg16-latest"
+    pullPolicy: "Always"
+  imagePullSecrets:
+    - name: ghcr-secret
   auth:
     postgresPassword: "rustdocs123"
     username: "rustdocs"
