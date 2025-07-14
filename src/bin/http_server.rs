@@ -1,5 +1,8 @@
 use async_openai::{config::OpenAIConfig, Client as OpenAIClient};
 use clap::Parser;
+use hyper::{service::service_fn, Method, Request, Response, StatusCode};
+use hyper_util::rt::{TokioExecutor, TokioIo};
+use hyper_util::server::conn::auto::Builder;
 use ndarray::Array1;
 use rmcp::{
     model::{
@@ -23,13 +26,10 @@ use rustdocs_mcp_server::{
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::{env, net::SocketAddr, sync::Arc, convert::Infallible};
+use std::{convert::Infallible, env, net::SocketAddr, sync::Arc};
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
-use hyper::{Request, Response, Method, StatusCode, service::service_fn};
-use hyper_util::rt::{TokioExecutor, TokioIo};
-use hyper_util::server::conn::auto::Builder;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about = "Rust documentation MCP server with HTTP SSE transport", long_about = None)]
@@ -656,7 +656,9 @@ impl McpHandler {
 }
 
 // Simple health check handler
-async fn health_handler(req: Request<hyper::body::Incoming>) -> Result<Response<String>, Infallible> {
+async fn health_handler(
+    req: Request<hyper::body::Incoming>,
+) -> Result<Response<String>, Infallible> {
     match (req.method(), req.uri().path()) {
         (&Method::GET, "/health") => {
             let response = Response::builder()
@@ -948,7 +950,7 @@ async fn main() -> Result<(), ServerError> {
         loop {
             let (stream, _) = listener.accept().await.unwrap();
             let io = TokioIo::new(stream);
-            
+
             tokio::task::spawn(async move {
                 if let Err(err) = Builder::new(TokioExecutor::new())
                     .serve_connection(io, service_fn(health_handler))
