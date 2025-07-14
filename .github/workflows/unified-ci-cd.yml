@@ -85,7 +85,13 @@ jobs:
       
       - name: Setup Rust environment
         run: |
-          # Self-hosted runners should have Rust pre-installed
+          echo "🚀 Setting up Rust build environment..."
+          
+          # Add cargo bin to PATH for this step and all subsequent steps
+          echo "/home/runner/.cargo/bin" >> $GITHUB_PATH
+          export PATH="/home/runner/.cargo/bin:$PATH"
+          
+          # Set up Rust toolchain (required for rust-builder image)
           rustup default stable
           rustup update stable
           rustup component add rustfmt clippy
@@ -130,9 +136,17 @@ jobs:
 
       - name: Setup Rust environment
         run: |
+          echo "🚀 Setting up Rust build environment..."
+          
+          # Add cargo bin to PATH for this step and all subsequent steps
+          echo "/home/runner/.cargo/bin" >> $GITHUB_PATH
+          export PATH="/home/runner/.cargo/bin:$PATH"
+          
+          # Set up Rust toolchain
           rustup default stable
           rustup update stable
           rustup component add rustfmt
+          echo "Rust version: $(rustc --version)"
 
       - name: Auto-format Rust code
         run: |
@@ -201,9 +215,17 @@ jobs:
 
       - name: Setup Rust environment
         run: |
+          echo "🚀 Setting up Rust build environment..."
+          
+          # Add cargo bin to PATH for this step and all subsequent steps
+          echo "/home/runner/.cargo/bin" >> $GITHUB_PATH
+          export PATH="/home/runner/.cargo/bin:$PATH"
+          
+          # Set up Rust toolchain
           rustup default stable
           rustup update stable
           rustup component add rustfmt clippy
+          echo "Rust version: $(rustc --version)"
 
       - name: Verify formatting is now correct
         run: |
@@ -236,8 +258,16 @@ jobs:
       
       - name: Setup Rust environment
         run: |
+          echo "🚀 Setting up Rust build environment..."
+          
+          # Add cargo bin to PATH for this step and all subsequent steps
+          echo "/home/runner/.cargo/bin" >> $GITHUB_PATH
+          export PATH="/home/runner/.cargo/bin:$PATH"
+          
+          # Set up Rust toolchain
           rustup default stable
           rustup update stable
+          echo "Rust version: $(rustc --version)"
 
       - name: Setup database
         env:
@@ -297,7 +327,11 @@ jobs:
 
       - name: Install cargo-audit
         if: steps.cargo-audit-cache.outputs.cache-hit != 'true'
-        run: cargo install cargo-audit --version 0.21.2
+        run: |
+          # Add cargo bin to PATH for this step
+          echo "/home/runner/.cargo/bin" >> $GITHUB_PATH
+          export PATH="/home/runner/.cargo/bin:$PATH"
+          cargo install cargo-audit --version 0.21.2
 
       - name: Rust security audit
         run: cargo audit || true
