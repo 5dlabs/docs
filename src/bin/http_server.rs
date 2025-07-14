@@ -23,10 +23,12 @@ use rustdocs_mcp_server::{
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::{env, net::SocketAddr, sync::Arc};
+use std::{env, net::SocketAddr, sync::Arc, convert::Infallible};
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use hyper::{Request, Response, Body, Method, StatusCode, service::{make_service_fn, service_fn}};
+use hyper_util::rt::TokioIo;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about = "Rust documentation MCP server with HTTP SSE transport", long_about = None)]
@@ -652,6 +654,27 @@ impl McpHandler {
     }
 }
 
+// Simple health check handler
+async fn health_handler(req: Request<Body>) -> Result<Response<Body>, Infallible> {
+    match (req.method(), req.uri().path()) {
+        (&Method::GET, "/health") => {
+            let response = Response::builder()
+                .status(StatusCode::OK)
+                .header("Content-Type", "application/json")
+                .body(Body::from(r#"{"status":"healthy","service":"rustdocs-mcp-server"}"#))
+                .unwrap();
+            Ok(response)
+        }
+        _ => {
+            let response = Response::builder()
+                .status(StatusCode::NOT_FOUND)
+                .body(Body::from("Not Found"))
+                .unwrap();
+            Ok(response)
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), ServerError> {
     // Initialize tracing
@@ -908,9 +931,27 @@ async fn main() -> Result<(), ServerError> {
         ct: CancellationToken::new(),
     };
 
-    info!("🌐 Starting SSE server on {bind_addr}");
+    // Setup health check server on port 8080 (standard health port)
+    let health_addr: SocketAddr = format!("{host}:8080")
+        .parse()
+        .map_err(|e| ServerError::Config(format!("Invalid health bind address: {e}")))?;
+
+    info!("🌐 Starting MCP server on {bind_addr}");
     info!("📡 SSE endpoint: http://{bind_addr}/sse");
     info!("📤 POST endpoint: http://{bind_addr}/message");
+    info!("🏥 Health endpoint: http://{health_addr}/health");
+
+    // Start health check server
+    tokio::spawn(async move {
+        let make_svc = make_service_fn(|_conn| async {
+            Ok::<_, Infallible>(service_fn(health_handler))
+        });
+
+        let server = hyper::Server::bind(&health_addr).serve(make_svc);
+        if let Err(e) = server.await {
+            tracing::error!("Health server error: {}", e);
+        }
+    });
 
     // Create and serve SSE server
     let mut sse_server = SseServer::serve_with_config(config)

@@ -42,9 +42,9 @@ ENV RUST_LOG=rustdocs_mcp_server_http=info,rmcp=info
 ENV HOST=0.0.0.0
 ENV PORT=3000
 
-# Health check (commented out since no health endpoint yet)
-# HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-#   CMD curl -f http://localhost:3000/health || exit 1
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD curl -f http://localhost:8080/health || exit 1
 
 # Set entrypoint and default command
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
