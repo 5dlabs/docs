@@ -112,9 +112,21 @@ volumeMounts: []
 #   mountPath: "/etc/foo"
 #   readOnly: true
 
-nodeSelector: {}
+# Node selection for cluster deployment
+# Option 1: Use worker node when available
+nodeSelector:
+  # Uncomment to prefer worker nodes (when talos-a43-ee1 is back online)
+  # kubernetes.io/hostname: talos-a43-ee1
+  
+  # Option 2: Use any node with worker role (if you have multiple workers)
+  # node-role.kubernetes.io/worker: ""
 
-tolerations: []
+# Tolerations to allow running on control plane nodes (for single-node clusters)
+tolerations:
+  # Allow scheduling on control plane nodes when no workers available
+  - key: node-role.kubernetes.io/control-plane
+    operator: Exists
+    effect: NoSchedule
 
 affinity: {}
 
@@ -184,6 +196,15 @@ postgresql:
       enabled: true
       storageClass: "local-path"
       size: 8Gi
+    # Node selection and tolerations for PostgreSQL
+    nodeSelector:
+      # Uncomment to prefer worker nodes (when talos-a43-ee1 is back online)
+      # kubernetes.io/hostname: talos-a43-ee1
+    tolerations:
+      # Allow scheduling on control plane nodes when no workers available
+      - key: node-role.kubernetes.io/control-plane
+        operator: Exists
+        effect: NoSchedule
     extendedConfiguration: |
       shared_preload_libraries = 'vector'
       maintenance_work_mem = '2GB'
