@@ -26,9 +26,9 @@ use rustdocs_mcp_server::{
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::{convert::Infallible, env, net::SocketAddr, sync::Arc};
 use tokio_util::sync::CancellationToken;
-use std::sync::atomic::{AtomicBool, Ordering};
 use tracing::{info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -680,7 +680,9 @@ impl McpHandler {
 }
 
 // Health check handler with liveness and readiness endpoints
-fn create_health_handler(readiness_state: ReadinessState) -> impl Fn(Request<hyper::body::Incoming>) -> Result<Response<String>, Infallible> + Clone {
+fn create_health_handler(
+    readiness_state: ReadinessState,
+) -> impl Fn(Request<hyper::body::Incoming>) -> Result<Response<String>, Infallible> + Clone {
     move |req: Request<hyper::body::Incoming>| -> Result<Response<String>, Infallible> {
         match (req.method(), req.uri().path()) {
             (&Method::GET, "/health/live") => {
@@ -763,7 +765,7 @@ async fn main() -> Result<(), ServerError> {
     let health_addr: SocketAddr = format!("{host}:8080")
         .parse()
         .map_err(|e| ServerError::Config(format!("Invalid health bind address: {e}")))?;
-    
+
     info!("🏥 Starting health server on {health_addr}");
     let health_handler = create_health_handler(readiness_state.clone());
     tokio::spawn(async move {
@@ -788,7 +790,9 @@ async fn main() -> Result<(), ServerError> {
     // Initialize database connection
     info!("🔌 Connecting to database...");
     let db = Database::new().await?;
-    readiness_state.database_connected.store(true, Ordering::Relaxed);
+    readiness_state
+        .database_connected
+        .store(true, Ordering::Relaxed);
     info!("✅ Database connected successfully");
 
     // Load crates from database configuration
@@ -872,7 +876,9 @@ async fn main() -> Result<(), ServerError> {
             "Failed to set embedding provider".to_string(),
         ));
     }
-    readiness_state.embedding_initialized.store(true, Ordering::Relaxed);
+    readiness_state
+        .embedding_initialized
+        .store(true, Ordering::Relaxed);
     info!("✅ {provider_name} embedding provider initialized");
 
     // Auto-populate missing crates during startup
@@ -945,7 +951,9 @@ async fn main() -> Result<(), ServerError> {
     }
 
     // Mark auto-population as complete (whether successful or not)
-    readiness_state.auto_population_complete.store(true, Ordering::Relaxed);
+    readiness_state
+        .auto_population_complete
+        .store(true, Ordering::Relaxed);
     info!("✅ Auto-population phase complete - service ready");
 
     // Get crate statistics for startup message (only for available crates)
