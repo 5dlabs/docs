@@ -1,9 +1,6 @@
-use rustdocs_mcp_server::{
-    database::Database,
-    error::ServerError,
-};
-use scraper::{Html, Selector};
 use clap::Parser;
+use rustdocs_mcp_server::{database::Database, error::ServerError};
+use scraper::{Html, Selector};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashSet, VecDeque};
 use std::fs;
@@ -49,8 +46,11 @@ struct CrateConfig {
 }
 
 async fn scan_crate_docs_count(crate_name: &str, max_pages: usize) -> Result<usize, ServerError> {
-    println!("🔍 Scanning docs.rs to estimate document count for: {}", crate_name);
-    
+    println!(
+        "🔍 Scanning docs.rs to estimate document count for: {}",
+        crate_name
+    );
+
     let base_url = format!("https://docs.rs/{}/latest/{}/", crate_name, crate_name);
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(30))
@@ -60,16 +60,14 @@ async fn scan_crate_docs_count(crate_name: &str, max_pages: usize) -> Result<usi
     let mut visited = HashSet::new();
     let mut to_visit = VecDeque::new();
     to_visit.push_back(base_url.clone());
-    
+
     let mut doc_pages_found = 0;
     let mut processed = 0;
 
     // More selective selectors for pages with substantial documentation content
-    let content_selectors = vec![
-        Selector::parse("div.docblock, section.docblock")
-            .map_err(|e| ServerError::Internal(format!("CSS selector error: {e}")))?,
-    ];
-    
+    let content_selectors = vec![Selector::parse("div.docblock, section.docblock")
+        .map_err(|e| ServerError::Internal(format!("CSS selector error: {e}")))?];
+
     // Additional selector for pages that have implementation details
     let secondary_selectors = vec![
         Selector::parse(".impl-items")
@@ -80,7 +78,10 @@ async fn scan_crate_docs_count(crate_name: &str, max_pages: usize) -> Result<usi
 
     while let Some(url) = to_visit.pop_front() {
         if processed >= max_pages {
-            println!("⚠️  Reached scan limit of {} pages, found {} docs so far", max_pages, doc_pages_found);
+            println!(
+                "⚠️  Reached scan limit of {} pages, found {} docs so far",
+                max_pages, doc_pages_found
+            );
             break;
         }
 
@@ -92,7 +93,10 @@ async fn scan_crate_docs_count(crate_name: &str, max_pages: usize) -> Result<usi
         processed += 1;
 
         if processed % 50 == 0 {
-            println!("📊 Scanned {}/{} pages, found {} docs", processed, max_pages, doc_pages_found);
+            println!(
+                "📊 Scanned {}/{} pages, found {} docs",
+                processed, max_pages, doc_pages_found
+            );
         }
 
         let html_content = match fetch_with_retry(&client, &url, 3).await {
@@ -108,7 +112,7 @@ async fn scan_crate_docs_count(crate_name: &str, max_pages: usize) -> Result<usi
         // Check if this page has substantial documentation content
         let mut has_primary_content = false;
         let mut has_secondary_content = false;
-        
+
         // Check for primary documentation content (docblocks)
         for selector in &content_selectors {
             if document.select(selector).next().is_some() {
@@ -116,7 +120,7 @@ async fn scan_crate_docs_count(crate_name: &str, max_pages: usize) -> Result<usi
                 break;
             }
         }
-        
+
         // Only check secondary content if no primary content found
         if !has_primary_content {
             for selector in &secondary_selectors {
@@ -126,9 +130,11 @@ async fn scan_crate_docs_count(crate_name: &str, max_pages: usize) -> Result<usi
                 }
             }
         }
-        
+
         // Count page if it has primary content, or if it's a meaningful secondary page
-        if has_primary_content || (has_secondary_content && !url.contains("index.html") && !url.contains("all.html")) {
+        if has_primary_content
+            || (has_secondary_content && !url.contains("index.html") && !url.contains("all.html"))
+        {
             doc_pages_found += 1;
         }
 
@@ -140,7 +146,7 @@ async fn scan_crate_docs_count(crate_name: &str, max_pages: usize) -> Result<usi
                     if href.starts_with('#') || href.is_empty() {
                         continue;
                     }
-                    
+
                     let full_url = if href.starts_with('/') {
                         format!("https://docs.rs{href}")
                     } else if href.starts_with("http") {
@@ -164,10 +170,12 @@ async fn scan_crate_docs_count(crate_name: &str, max_pages: usize) -> Result<usi
                     };
 
                     // Only follow links within the same crate's documentation, and skip fragments
-                    if full_url.contains(&format!("docs.rs/{crate_name}/")) && 
-                       !full_url.contains('#') &&
-                       !visited.contains(&full_url) &&
-                       to_visit.len() < max_pages * 2 { // Prevent queue explosion
+                    if full_url.contains(&format!("docs.rs/{crate_name}/"))
+                        && !full_url.contains('#')
+                        && !visited.contains(&full_url)
+                        && to_visit.len() < max_pages * 2
+                    {
+                        // Prevent queue explosion
                         to_visit.push_back(full_url);
                     }
                 }
@@ -178,16 +186,25 @@ async fn scan_crate_docs_count(crate_name: &str, max_pages: usize) -> Result<usi
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
 
-    println!("✅ Scan complete: found {} documentation pages in {} total pages", doc_pages_found, processed);
+    println!(
+        "✅ Scan complete: found {} documentation pages in {} total pages",
+        doc_pages_found, processed
+    );
     Ok(doc_pages_found)
 }
 
-async fn fetch_with_retry(client: &reqwest::Client, url: &str, retries: usize) -> Result<String, ServerError> {
+async fn fetch_with_retry(
+    client: &reqwest::Client,
+    url: &str,
+    retries: usize,
+) -> Result<String, ServerError> {
     for attempt in 0..retries {
         match client.get(url).send().await {
             Ok(response) => {
                 if response.status().is_success() {
-                    return response.text().await
+                    return response
+                        .text()
+                        .await
                         .map_err(|e| ServerError::Network(e.to_string()));
                 } else if response.status().as_u16() == 429 {
                     // Rate limited, wait and retry
@@ -195,7 +212,11 @@ async fn fetch_with_retry(client: &reqwest::Client, url: &str, retries: usize) -
                     tokio::time::sleep(wait_time).await;
                     continue;
                 } else {
-                    return Err(ServerError::Network(format!("HTTP {}: {}", response.status(), url)));
+                    return Err(ServerError::Network(format!(
+                        "HTTP {}: {}",
+                        response.status(),
+                        url
+                    )));
                 }
             }
             Err(e) => {
@@ -214,15 +235,22 @@ async fn main() -> Result<(), ServerError> {
     let cli = Cli::parse();
 
     // Check if crate exists on docs.rs first
-    let test_url = format!("https://docs.rs/{}/latest/{}/", cli.crate_name, cli.crate_name);
+    let test_url = format!(
+        "https://docs.rs/{}/latest/{}/",
+        cli.crate_name, cli.crate_name
+    );
     let client = reqwest::Client::new();
-    let response = client.head(&test_url).send().await
+    let response = client
+        .head(&test_url)
+        .send()
+        .await
         .map_err(|e| ServerError::Network(e.to_string()))?;
 
     if !response.status().is_success() {
         return Err(ServerError::Config(format!(
             "Crate '{}' not found on docs.rs (HTTP {}). Please verify the crate name.",
-            cli.crate_name, response.status()
+            cli.crate_name,
+            response.status()
         )));
     }
 
@@ -251,7 +279,7 @@ async fn main() -> Result<(), ServerError> {
                 cli.crate_name
             )));
         }
-        
+
         println!("📝 Updating existing crate '{}'", cli.crate_name);
         existing.features = cli.features;
         existing.enabled = cli.enabled;
@@ -272,25 +300,34 @@ async fn main() -> Result<(), ServerError> {
     // Write updated config back to file
     let updated_content = serde_json::to_string_pretty(&config)
         .map_err(|e| ServerError::Config(format!("Failed to serialize config: {e}")))?;
-    
+
     fs::write(config_path, updated_content)
         .map_err(|e| ServerError::Config(format!("Failed to write {}: {}", config_path, e)))?;
 
-    println!("✅ Successfully added/updated '{}' in proxy-config.json", cli.crate_name);
+    println!(
+        "✅ Successfully added/updated '{}' in proxy-config.json",
+        cli.crate_name
+    );
     println!("📊 Expected documents: {}", expected_docs);
-    
+
     // Optional: Show current database stats for this crate
     if let Ok(db) = Database::new().await {
         if let Ok(current_count) = db.count_crate_documents(&cli.crate_name).await {
             if current_count > 0 {
                 println!("📚 Current documents in database: {}", current_count);
                 if current_count < expected_docs {
-                    println!("⚠️  Database has fewer docs than expected ({} < {})", current_count, expected_docs);
+                    println!(
+                        "⚠️  Database has fewer docs than expected ({} < {})",
+                        current_count, expected_docs
+                    );
                     println!("💡 Run the server to trigger automatic backfill, or use 'cargo run --bin populate_db -- --crate-name {}'", cli.crate_name);
                 }
             } else {
                 println!("📚 No documents in database yet for this crate");
-                println!("💡 Run 'cargo run --bin populate_db -- --crate-name {}' to populate", cli.crate_name);
+                println!(
+                    "💡 Run 'cargo run --bin populate_db -- --crate-name {}' to populate",
+                    cli.crate_name
+                );
             }
         }
     }

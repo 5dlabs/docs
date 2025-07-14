@@ -1,5 +1,5 @@
 use rustdocs_mcp_server::{
-    database::{Database, CrateConfig},
+    database::{CrateConfig, Database},
     error::ServerError,
 };
 use serde::{Deserialize, Serialize};
@@ -49,11 +49,17 @@ async fn main() -> Result<(), ServerError> {
     let mut skipped = 0;
 
     for old_config in config.crates {
-        println!("\nMigrating: {} (enabled: {})", old_config.name, old_config.enabled);
+        println!(
+            "\nMigrating: {} (enabled: {})",
+            old_config.name, old_config.enabled
+        );
 
         // Check if already exists
         if let Some(existing) = db.get_crate_config(&old_config.name, "latest").await? {
-            println!("  ⚠️  Already exists in database (id: {}), skipping", existing.id);
+            println!(
+                "  ⚠️  Already exists in database (id: {}), skipping",
+                existing.id
+            );
             skipped += 1;
             continue;
         }

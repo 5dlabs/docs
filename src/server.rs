@@ -15,9 +15,6 @@ use async_openai::{
 use ndarray::Array1;
 use rmcp::model::AnnotateAble; // Import trait for .no_annotation()
 use rmcp::{
-    Error as McpError,
-    Peer,
-    ServerHandler, // Import necessary rmcp items
     model::{
         CallToolResult,
         Content,
@@ -46,6 +43,9 @@ use rmcp::{
     },
     service::{RequestContext, RoleServer},
     tool,
+    Error as McpError,
+    Peer,
+    ServerHandler, // Import necessary rmcp items
 };
 use schemars::JsonSchema; // Import JsonSchema
 use serde::Deserialize; // Import Deserialize
@@ -70,11 +70,11 @@ struct QueryRustDocsArgs {
 pub struct RustDocsServer {
     crate_name: Arc<String>, // Use Arc for cheap cloning
     embeddings: Arc<Vec<(String, Array1<f32>)>>,
-    database: Arc<Database>, // Add database connection
-    peer: Arc<Mutex<Option<Peer<RoleServer>>>>, // Uses tokio::sync::Mutex
+    database: Arc<Database>,                     // Add database connection
+    peer: Arc<Mutex<Option<Peer<RoleServer>>>>,  // Uses tokio::sync::Mutex
     startup_message: Arc<Mutex<Option<String>>>, // Keep the message itself
-    startup_message_sent: Arc<Mutex<bool>>,     // Flag to track if sent (using tokio::sync::Mutex)
-                                                // tool_name and info are handled by ServerHandler/macros now
+    startup_message_sent: Arc<Mutex<bool>>,      // Flag to track if sent (using tokio::sync::Mutex)
+                                                 // tool_name and info are handled by ServerHandler/macros now
 }
 
 impl RustDocsServer {
@@ -132,7 +132,7 @@ impl RustDocsServer {
 // --- Tool Implementation ---
 
 #[tool(tool_box)] // Add tool_box here as well, mirroring the example
-// Tool methods go in a regular impl block
+                  // Tool methods go in a regular impl block
 impl RustDocsServer {
     // Define the tool using the tool macro
     // Name removed; will be handled dynamically by overriding list_tools/get_tool
@@ -163,16 +163,14 @@ impl RustDocsServer {
 
         let crate_name = &args.crate_name;
         let question = &args.question;
-        
+
         // Use the explicitly provided crate name
         let target_crate = crate_name;
 
         // Log received query via MCP
         self.send_log(
             LoggingLevel::Info,
-            format!(
-                "Searching in crate '{target_crate}' for: {question}"
-            ),
+            format!("Searching in crate '{target_crate}' for: {question}"),
         );
 
         // --- Embedding Generation for Question ---
@@ -197,22 +195,20 @@ impl RustDocsServer {
             LoggingLevel::Info,
             format!("Performing vector search in database for crate '{target_crate}'"),
         );
-        
-        let search_results = self.database
+
+        let search_results = self
+            .database
             .search_similar_docs(target_crate, &question_vector, 3)
             .await
             .map_err(|e| {
-                self.send_log(
-                    LoggingLevel::Error,
-                    format!("Database search failed: {e}"),
-                );
+                self.send_log(LoggingLevel::Error, format!("Database search failed: {e}"));
                 McpError::internal_error(format!("Database search error: {e}"), None)
             })?;
-        
+
         // --- Generate Response using LLM ---
         let response_text = if !search_results.is_empty() {
             let (best_path, best_content, best_score) = &search_results[0];
-            
+
             self.send_log(
                 LoggingLevel::Info,
                 format!(
@@ -220,7 +216,7 @@ impl RustDocsServer {
                     search_results.len()
                 ),
             );
-            
+
             // Combine top results for better context
             let combined_context = if search_results.len() > 1 {
                 search_results
@@ -237,14 +233,14 @@ impl RustDocsServer {
             } else {
                 best_content.clone()
             };
-            
+
             // Check if this is an in-memory fallback or actual DB result
             let source = if self.embeddings.is_empty() {
                 "vector database"
             } else {
                 "vector database (with in-memory cache)"
             };
-            
+
             let result_count = search_results.len();
             self.send_log(
                 LoggingLevel::Info,
@@ -252,72 +248,73 @@ impl RustDocsServer {
             );
 
             {
-                    // Get OpenAI client for LLM chat completion (separate from embedding provider)
-                    let openai_client = if let Ok(api_base) = env::var("OPENAI_API_BASE") {
-                        let config = OpenAIConfig::new().with_api_base(api_base);
-                        OpenAIClient::with_config(config)
-                    } else {
-                        OpenAIClient::new()
-                    };
+                // Get OpenAI client for LLM chat completion (separate from embedding provider)
+                let openai_client = if let Ok(api_base) = env::var("OPENAI_API_BASE") {
+                    let config = OpenAIConfig::new().with_api_base(api_base);
+                    OpenAIClient::with_config(config)
+                } else {
+                    OpenAIClient::new()
+                };
 
-                    let system_prompt = format!(
+                let system_prompt = format!(
                         "You are an expert technical assistant for the Rust crate '{target_crate}'. \
                          Answer the user's question based *only* on the provided context. \
                          If the context does not contain the answer, say so. \
                          Do not make up information. Be clear, concise, and comprehensive providing example usage code when possible."
                     );
-                    let user_prompt = format!(
-                        "Context:\n---\n{combined_context}\n---\n\nQuestion: {question}"
-                    );
+                let user_prompt =
+                    format!("Context:\n---\n{combined_context}\n---\n\nQuestion: {question}");
 
-                    let llm_model: String = env::var("LLM_MODEL")
-                        .unwrap_or_else(|_| "gpt-4o-mini-2024-07-18".to_string());
-                    let chat_request = CreateChatCompletionRequestArgs::default()
-                        .model(llm_model)
-                        .messages(vec![
-                            ChatCompletionRequestSystemMessageArgs::default()
-                                .content(system_prompt)
-                                .build()
-                                .map_err(|e| {
-                                    McpError::internal_error(
-                                        format!("Failed to build system message: {e}"),
-                                        None,
-                                    )
-                                })?
-                                .into(),
-                            ChatCompletionRequestUserMessageArgs::default()
-                                .content(user_prompt)
-                                .build()
-                                .map_err(|e| {
-                                    McpError::internal_error(
-                                        format!("Failed to build user message: {e}"),
-                                        None,
-                                    )
-                                })?
-                                .into(),
-                        ])
-                        .build()
-                        .map_err(|e| {
-                            McpError::internal_error(
-                                format!("Failed to build chat request: {e}"),
-                                None,
-                            )
-                        })?;
-
-                    let chat_response = openai_client.chat().create(chat_request).await.map_err(|e| {
-                        McpError::internal_error(format!("OpenAI chat API error: {e}"), None)
+                let llm_model: String =
+                    env::var("LLM_MODEL").unwrap_or_else(|_| "gpt-4o-mini-2024-07-18".to_string());
+                let chat_request = CreateChatCompletionRequestArgs::default()
+                    .model(llm_model)
+                    .messages(vec![
+                        ChatCompletionRequestSystemMessageArgs::default()
+                            .content(system_prompt)
+                            .build()
+                            .map_err(|e| {
+                                McpError::internal_error(
+                                    format!("Failed to build system message: {e}"),
+                                    None,
+                                )
+                            })?
+                            .into(),
+                        ChatCompletionRequestUserMessageArgs::default()
+                            .content(user_prompt)
+                            .build()
+                            .map_err(|e| {
+                                McpError::internal_error(
+                                    format!("Failed to build user message: {e}"),
+                                    None,
+                                )
+                            })?
+                            .into(),
+                    ])
+                    .build()
+                    .map_err(|e| {
+                        McpError::internal_error(format!("Failed to build chat request: {e}"), None)
                     })?;
 
-                    self.send_log(
-                        LoggingLevel::Info,
-                        "Generating response using LLM based on vector DB results".to_string(),
-                    );
-                    
-                    chat_response
-                        .choices
-                        .first()
-                        .and_then(|choice| choice.message.content.clone())
-                        .unwrap_or_else(|| "Error: No response from LLM.".to_string())
+                let chat_response =
+                    openai_client
+                        .chat()
+                        .create(chat_request)
+                        .await
+                        .map_err(|e| {
+                            McpError::internal_error(format!("OpenAI chat API error: {e}"), None)
+                        })?;
+
+                self.send_log(
+                    LoggingLevel::Info,
+                    "Generating response using LLM based on vector DB results".to_string(),
+                );
+
+                chat_response
+                    .choices
+                    .first()
+                    .and_then(|choice| choice.message.content.clone())
+                    .unwrap_or_else(|| "Error: No response from LLM.".to_string())
             }
         } else {
             self.send_log(
@@ -329,20 +326,16 @@ impl RustDocsServer {
 
         // --- Format and Return Result ---
         let final_response = if !search_results.is_empty() {
-            format!(
-                "From {target_crate} docs (via vector database search): {response_text}"
-            )
+            format!("From {target_crate} docs (via vector database search): {response_text}")
         } else {
-            format!(
-                "From {target_crate} docs: {response_text}"
-            )
+            format!("From {target_crate} docs: {response_text}")
         };
-        
+
         self.send_log(
             LoggingLevel::Info,
             "Successfully generated response".to_string(),
         );
-        
+
         Ok(CallToolResult::success(vec![Content::text(final_response)]))
     }
 }
@@ -386,9 +379,10 @@ impl ServerHandler for RustDocsServer {
     ) -> Result<ListResourcesResult, McpError> {
         // Example: Return the crate name as a resource
         Ok(ListResourcesResult {
-            resources: vec![
-                self._create_resource_text(&format!("crate://{crate_name}", crate_name = self.crate_name), "crate_name"),
-            ],
+            resources: vec![self._create_resource_text(
+                &format!("crate://{crate_name}", crate_name = self.crate_name),
+                "crate_name",
+            )],
             next_cursor: None,
         })
     }

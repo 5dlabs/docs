@@ -1,14 +1,13 @@
 use crate::{doc_loader::Document, error::ServerError};
 use async_openai::{
-    config::OpenAIConfig, types::CreateEmbeddingRequestArgs,
-    Client as OpenAIClient,
+    config::OpenAIConfig, types::CreateEmbeddingRequestArgs, Client as OpenAIClient,
 };
-use ndarray::{Array1, ArrayView1};
-use std::sync::OnceLock;
-use std::sync::Arc;
-use tiktoken_rs::cl100k_base;
 use futures::stream::{self, StreamExt};
+use ndarray::{Array1, ArrayView1};
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+use std::sync::OnceLock;
+use tiktoken_rs::cl100k_base;
 
 // Static OnceLock for the embedding client
 pub static EMBEDDING_CLIENT: OnceLock<Arc<dyn EmbeddingProvider + Send + Sync>> = OnceLock::new();
@@ -89,12 +88,13 @@ impl EmbeddingProvider for OpenAIEmbeddingProvider {
 
         let response = self.client.embeddings().create(request).await?;
 
-        let embeddings: Vec<Vec<f32>> = response.data
+        let embeddings: Vec<Vec<f32>> = response
+            .data
             .into_iter()
             .map(|data| data.embedding)
             .collect();
 
-                let total_tokens = response.usage.total_tokens as usize;
+        let total_tokens = response.usage.total_tokens as usize;
 
         Ok((embeddings, total_tokens))
     }
@@ -137,12 +137,12 @@ impl EmbeddingProvider for VoyageAIEmbeddingProvider {
             )));
         }
 
-        let voyage_response: VoyageEmbeddingResponse = response
-            .json()
-            .await
-            .map_err(|e| ServerError::Parsing(format!("Failed to parse Voyage AI response: {e}")))?;
+        let voyage_response: VoyageEmbeddingResponse = response.json().await.map_err(|e| {
+            ServerError::Parsing(format!("Failed to parse Voyage AI response: {e}"))
+        })?;
 
-        let embeddings: Vec<Vec<f32>> = voyage_response.data
+        let embeddings: Vec<Vec<f32>> = voyage_response
+            .data
             .into_iter()
             .map(|data| data.embedding)
             .collect();
@@ -172,7 +172,9 @@ impl VoyageAIEmbeddingProvider {
 }
 
 /// Initialize the embedding provider based on configuration
-pub fn initialize_embedding_provider(config: EmbeddingConfig) -> Arc<dyn EmbeddingProvider + Send + Sync> {
+pub fn initialize_embedding_provider(
+    config: EmbeddingConfig,
+) -> Arc<dyn EmbeddingProvider + Send + Sync> {
     match config {
         EmbeddingConfig::OpenAI { client, model } => {
             Arc::new(OpenAIEmbeddingProvider::new(client, model))
@@ -183,7 +185,7 @@ pub fn initialize_embedding_provider(config: EmbeddingConfig) -> Arc<dyn Embeddi
     }
 }
 
-use bincode::{Encode, Decode};
+use bincode::{Decode, Encode};
 
 // Define a struct containing path, content, and embedding for caching
 #[derive(Serialize, Deserialize, Debug, Encode, Decode)]
@@ -232,7 +234,9 @@ fn _chunk_content(content: &str, bpe: &tiktoken_rs::CoreBPE, token_limit: usize)
         let sentence_tokens = bpe.encode_with_special_tokens(&sentence_with_period);
 
         // If adding this sentence would exceed the limit, save current chunk
-        if !current_chunk_tokens.is_empty() && current_chunk_tokens.len() + sentence_tokens.len() > token_limit {
+        if !current_chunk_tokens.is_empty()
+            && current_chunk_tokens.len() + sentence_tokens.len() > token_limit
+        {
             let chunk_text = current_chunk_sentences.join(" ");
             chunks.push(chunk_text);
             current_chunk_sentences.clear();
@@ -274,14 +278,19 @@ fn _chunk_content(content: &str, bpe: &tiktoken_rs::CoreBPE, token_limit: usize)
 #[allow(dead_code)]
 pub async fn generate_embeddings(
     documents: &[Document],
-) -> Result<(Vec<(String, String, Array1<f32>)>, usize), ServerError> { // Return tuple: (path, content, embedding), total_tokens
+) -> Result<(Vec<(String, String, Array1<f32>)>, usize), ServerError> {
+    // Return tuple: (path, content, embedding), total_tokens
     // Get the embedding provider
     let provider = EMBEDDING_CLIENT
         .get()
         .ok_or_else(|| ServerError::Internal("Embedding provider not initialized".to_string()))?;
 
     let model = provider.get_model_name();
-    eprintln!("Generating embeddings for {} documents using model '{}'...", documents.len(), model);
+    eprintln!(
+        "Generating embeddings for {} documents using model '{}'...",
+        documents.len(),
+        model
+    );
 
     // Get the tokenizer for the model and wrap in Arc
     let bpe = Arc::new(cl100k_base().map_err(|e| ServerError::Tiktoken(e.to_string()))?);
@@ -322,7 +331,11 @@ pub async fn generate_embeddings(
     }
 
     let total_chunks = all_chunks.len();
-    eprintln!("Total chunks to process: {} (from {} documents)", total_chunks, documents.len());
+    eprintln!(
+        "Total chunks to process: {} (from {} documents)",
+        total_chunks,
+        documents.len()
+    );
 
     let results = stream::iter(all_chunks.into_iter().enumerate())
         .map(|(chunk_index, (_doc_index, path, content))| {
@@ -354,7 +367,8 @@ pub async fn generate_embeddings(
                 if embeddings.len() != 1 {
                     return Err(ServerError::Internal(format!(
                         "Mismatch in response length for chunk {}. Expected 1, got {}.",
-                        chunk_index + 1, embeddings.len()
+                        chunk_index + 1,
+                        embeddings.len()
                     )));
                 }
 
@@ -389,7 +403,8 @@ pub async fn generate_embeddings(
 
     eprintln!(
         "Finished generating embeddings. Successfully processed {} chunks/documents ({} tokens).",
-        embeddings_vec.len(), total_processed_tokens
+        embeddings_vec.len(),
+        total_processed_tokens
     );
     Ok((embeddings_vec, total_processed_tokens)) // Return tuple
 }

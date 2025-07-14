@@ -1,8 +1,4 @@
-use rustdocs_mcp_server::{
-    database::Database,
-    doc_loader,
-    error::ServerError,
-};
+use rustdocs_mcp_server::{database::Database, doc_loader, error::ServerError};
 #[tokio::main]
 async fn main() -> Result<(), ServerError> {
     dotenvy::dotenv().ok();
@@ -12,18 +8,24 @@ async fn main() -> Result<(), ServerError> {
 
     // Get all crates without version
     let crates = db.get_crate_stats().await?;
-    let crates_without_version: Vec<_> = crates
-        .into_iter()
-        .filter(|c| c.version.is_none())
-        .collect();
+    let crates_without_version: Vec<_> =
+        crates.into_iter().filter(|c| c.version.is_none()).collect();
 
-    println!("Found {} crates without version information", crates_without_version.len());
+    println!(
+        "Found {} crates without version information",
+        crates_without_version.len()
+    );
 
     let mut updated = 0;
     let mut failed = 0;
 
     for (i, crate_stat) in crates_without_version.iter().enumerate() {
-        println!("\n[{}/{}] Processing: {}", i + 1, crates_without_version.len(), crate_stat.name);
+        println!(
+            "\n[{}/{}] Processing: {}",
+            i + 1,
+            crates_without_version.len(),
+            crate_stat.name
+        );
 
         // Load just the first page to extract version
         match doc_loader::load_documents_from_docs_rs(&crate_stat.name, "*", None, Some(1)).await {
@@ -59,7 +61,10 @@ async fn main() -> Result<(), ServerError> {
     println!("\n📊 Summary:");
     println!("  ✅ Updated: {updated} crates");
     println!("  ❌ Failed: {failed} crates");
-    println!("  ⚠️  No version: {} crates", crates_without_version.len() - updated - failed);
+    println!(
+        "  ⚠️  No version: {} crates",
+        crates_without_version.len() - updated - failed
+    );
 
     Ok(())
 }

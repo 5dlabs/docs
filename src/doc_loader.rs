@@ -1,7 +1,7 @@
 use scraper::{Html, Selector};
-use thiserror::Error;
 use std::collections::{HashSet, VecDeque};
 use std::time::Duration;
+use thiserror::Error;
 
 #[derive(Debug, Error)]
 #[allow(dead_code)] // Some variants are only used in specific contexts
@@ -128,13 +128,16 @@ pub async fn load_documents_from_docs_rs(
         }
 
         if !page_content.is_empty() {
-            let relative_path = url.strip_prefix("https://docs.rs/")
+            let relative_path = url
+                .strip_prefix("https://docs.rs/")
                 .unwrap_or(&url)
                 .to_string();
 
             let blocks = page_content.len();
             let chars = page_content.join("\n\n").len();
-            eprintln!("  -> Extracted content from: {relative_path} ({blocks} blocks, {chars} chars)");
+            eprintln!(
+                "  -> Extracted content from: {relative_path} ({blocks} blocks, {chars} chars)"
+            );
 
             documents.push(Document {
                 path: relative_path,
@@ -168,12 +171,14 @@ pub async fn load_documents_from_docs_rs(
                         if let Ok(absolute_url) = reqwest::Url::parse(&url) {
                             if let Ok(new_url) = absolute_url.join(href) {
                                 let new_url_str = new_url.to_string();
-                                if new_url_str.contains("docs.rs") &&
-                                   new_url_str.contains(crate_name) &&
-                                   !visited.contains(&new_url_str) {
+                                if new_url_str.contains("docs.rs")
+                                    && new_url_str.contains(crate_name)
+                                    && !visited.contains(&new_url_str)
+                                {
                                     to_visit.push_back(new_url_str.clone());
                                     added_links += 1;
-                                    if added_links <= 5 { // Only show first 5 for brevity
+                                    if added_links <= 5 {
+                                        // Only show first 5 for brevity
                                         eprintln!("  -> Adding link: {href}");
                                     }
                                 }
@@ -217,7 +222,12 @@ pub fn load_documents(
     let rt = tokio::runtime::Runtime::new()
         .map_err(|e| DocLoaderError::Parsing(format!("Failed to create tokio runtime: {e}")))?;
 
-    rt.block_on(load_documents_from_docs_rs(crate_name, crate_version_req, features, None))
+    rt.block_on(load_documents_from_docs_rs(
+        crate_name,
+        crate_version_req,
+        features,
+        None,
+    ))
 }
 
 /// Fetch a URL with retry logic and rate limiting
@@ -249,16 +259,18 @@ async fn fetch_with_retry(
                     let max_retries_plus = max_retries + 1;
                     eprintln!("Rate limited for {url}, waiting {delay:?} before retry {retry_num}/{max_retries_plus}");
                     if attempts >= max_retries {
-                        return Err(DocLoaderError::RateLimited(
-                            format!("Rate limited after {} attempts", attempts + 1)
-                        ));
+                        return Err(DocLoaderError::RateLimited(format!(
+                            "Rate limited after {} attempts",
+                            attempts + 1
+                        )));
                     }
                 } else {
                     eprintln!("HTTP error for {}: {}", url, response.status());
                     if attempts >= max_retries {
-                        return Err(DocLoaderError::Network(
-                            format!("HTTP {}", response.status())
-                        ));
+                        return Err(DocLoaderError::Network(format!(
+                            "HTTP {}",
+                            response.status()
+                        )));
                     }
                 }
             }

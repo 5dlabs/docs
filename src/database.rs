@@ -13,8 +13,9 @@ pub struct Database {
 #[allow(dead_code)] // Some methods are only used by specific binaries
 impl Database {
     pub async fn new() -> Result<Self, ServerError> {
-        let database_url = env::var("MCPDOCS_DATABASE_URL")
-            .unwrap_or_else(|_| "postgresql://jonathonfritz@localhost/rust_docs_vectors".to_string());
+        let database_url = env::var("MCPDOCS_DATABASE_URL").unwrap_or_else(|_| {
+            "postgresql://jonathonfritz@localhost/rust_docs_vectors".to_string()
+        });
 
         let pool = PgPoolOptions::new()
             .max_connections(5)
@@ -26,7 +27,11 @@ impl Database {
     }
 
     /// Insert or update a crate in the database
-    pub async fn upsert_crate(&self, crate_name: &str, version: Option<&str>) -> Result<i32, ServerError> {
+    pub async fn upsert_crate(
+        &self,
+        crate_name: &str,
+        version: Option<&str>,
+    ) -> Result<i32, ServerError> {
         let result = sqlx::query(
             r#"
             INSERT INTO crates (name, version)
@@ -36,7 +41,7 @@ impl Database {
                 version = COALESCE($2, crates.version),
                 last_updated = CURRENT_TIMESTAMP
             RETURNING id
-            "#
+            "#,
         )
         .bind(crate_name)
         .bind(version)
@@ -55,7 +60,7 @@ impl Database {
             SELECT EXISTS(
                 SELECT 1 FROM doc_embeddings WHERE crate_name = $1
             ) as exists
-            "#
+            "#,
         )
         .bind(crate_name)
         .fetch_one(&self.pool)
@@ -110,7 +115,10 @@ impl Database {
         crate_name: &str,
         embeddings: &[(String, String, Array1<f32>, i32)], // (path, content, embedding, token_count)
     ) -> Result<(), ServerError> {
-        let mut tx = self.pool.begin().await
+        let mut tx = self
+            .pool
+            .begin()
+            .await
             .map_err(|e| ServerError::Database(format!("Failed to begin transaction: {e}")))?;
 
         for (doc_path, content, embedding, token_count) in embeddings {
@@ -139,7 +147,8 @@ impl Database {
             .map_err(|e| ServerError::Database(format!("Failed to insert embedding: {e}")))?;
         }
 
-        tx.commit().await
+        tx.commit()
+            .await
             .map_err(|e| ServerError::Database(format!("Failed to commit transaction: {e}")))?;
 
         // Update crate statistics
@@ -160,7 +169,7 @@ impl Database {
                 SELECT COALESCE(SUM(token_count), 0) FROM doc_embeddings WHERE crate_id = $1
             )
             WHERE id = $1
-            "#
+            "#,
         )
         .bind(crate_id)
         .execute(&self.pool)
@@ -189,7 +198,7 @@ impl Database {
             WHERE crate_name = $2
             ORDER BY embedding <=> $1
             LIMIT $3
-            "#
+            "#,
         )
         .bind(embedding_vec)
         .bind(crate_name)
@@ -225,7 +234,7 @@ impl Database {
             FROM doc_embeddings
             WHERE crate_name = $1
             ORDER BY doc_path
-            "#
+            "#,
         )
         .bind(crate_name)
         .fetch_all(&self.pool)
@@ -233,9 +242,14 @@ impl Database {
         .map_err(|e| ServerError::Database(format!("Failed to get crate documents: {e}")))?;
 
         let query_time = query_start.elapsed();
-        eprintln!("    📊 Found {} documents for {} in {:.3}s", results.len(), crate_name, query_time.as_secs_f64());
+        eprintln!(
+            "    📊 Found {} documents for {} in {:.3}s",
+            results.len(),
+            crate_name,
+            query_time.as_secs_f64()
+        );
 
-                let mut documents = Vec::new();
+        let mut documents = Vec::new();
         for (i, row) in results.iter().enumerate() {
             let doc_path: String = row.get("doc_path");
             let content: String = row.get("content");
@@ -243,8 +257,14 @@ impl Database {
             let embedding_array = Array1::from_vec(embedding_vec.to_vec());
 
             if i < 3 || (i + 1) % 5 == 0 {
-                eprintln!("    📄 [{}/{}] Processed: {} ({} chars, {} dims)",
-                    i + 1, results.len(), doc_path, content.len(), embedding_array.len());
+                eprintln!(
+                    "    📄 [{}/{}] Processed: {} ({} chars, {} dims)",
+                    i + 1,
+                    results.len(),
+                    doc_path,
+                    content.len(),
+                    embedding_array.len()
+                );
             }
 
             documents.push((doc_path, content, embedding_array));
@@ -258,7 +278,7 @@ impl Database {
         sqlx::query(
             r#"
             DELETE FROM doc_embeddings WHERE crate_name = $1
-            "#
+            "#,
         )
         .bind(crate_name)
         .execute(&self.pool)
@@ -280,7 +300,7 @@ impl Database {
                 total_tokens
             FROM crates
             ORDER BY name
-            "#
+            "#,
         )
         .fetch_all(&self.pool)
         .await
@@ -313,7 +333,7 @@ impl Database {
             SELECT COUNT(*) as count
             FROM doc_embeddings
             WHERE crate_name = $1
-            "#
+            "#,
         )
         .bind(crate_name)
         .fetch_one(&self.pool)
@@ -327,7 +347,10 @@ impl Database {
     // ===== Crate Configuration Methods =====
 
     /// Get all crate configurations
-    pub async fn get_crate_configs(&self, enabled_only: bool) -> Result<Vec<CrateConfig>, ServerError> {
+    pub async fn get_crate_configs(
+        &self,
+        enabled_only: bool,
+    ) -> Result<Vec<CrateConfig>, ServerError> {
         let query = if enabled_only {
             "SELECT * FROM crate_configs WHERE enabled = true ORDER BY name, version_spec"
         } else {
@@ -343,9 +366,13 @@ impl Database {
     }
 
     /// Get a specific crate configuration
-    pub async fn get_crate_config(&self, name: &str, version_spec: &str) -> Result<Option<CrateConfig>, ServerError> {
+    pub async fn get_crate_config(
+        &self,
+        name: &str,
+        version_spec: &str,
+    ) -> Result<Option<CrateConfig>, ServerError> {
         let config = sqlx::query_as::<_, CrateConfig>(
-            "SELECT * FROM crate_configs WHERE name = $1 AND version_spec = $2"
+            "SELECT * FROM crate_configs WHERE name = $1 AND version_spec = $2",
         )
         .bind(name)
         .bind(version_spec)
@@ -357,7 +384,10 @@ impl Database {
     }
 
     /// Add or update a crate configuration
-    pub async fn upsert_crate_config(&self, config: &CrateConfig) -> Result<CrateConfig, ServerError> {
+    pub async fn upsert_crate_config(
+        &self,
+        config: &CrateConfig,
+    ) -> Result<CrateConfig, ServerError> {
         let result = sqlx::query_as::<_, CrateConfig>(
             r#"
             INSERT INTO crate_configs (name, version_spec, current_version, features, expected_docs, enabled)
@@ -385,15 +415,17 @@ impl Database {
     }
 
     /// Delete a crate configuration
-    pub async fn delete_crate_config(&self, name: &str, version_spec: &str) -> Result<bool, ServerError> {
-        let result = sqlx::query(
-            "DELETE FROM crate_configs WHERE name = $1 AND version_spec = $2"
-        )
-        .bind(name)
-        .bind(version_spec)
-        .execute(&self.pool)
-        .await
-        .map_err(|e| ServerError::Database(format!("Failed to delete crate config: {e}")))?;
+    pub async fn delete_crate_config(
+        &self,
+        name: &str,
+        version_spec: &str,
+    ) -> Result<bool, ServerError> {
+        let result = sqlx::query("DELETE FROM crate_configs WHERE name = $1 AND version_spec = $2")
+            .bind(name)
+            .bind(version_spec)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| ServerError::Database(format!("Failed to delete crate config: {e}")))?;
 
         Ok(result.rows_affected() > 0)
     }
@@ -427,7 +459,7 @@ impl Database {
             INSERT INTO population_jobs (crate_config_id, status, created_at)
             VALUES ($1, 'pending', CURRENT_TIMESTAMP)
             RETURNING id
-            "#
+            "#,
         )
         .bind(crate_config_id)
         .fetch_one(&self.pool)

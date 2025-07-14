@@ -8,17 +8,14 @@ mod server;
 // Use necessary items from modules and crates
 use crate::{
     database::Database,
-    embeddings::{EMBEDDING_CLIENT, EmbeddingConfig, initialize_embedding_provider},
+    embeddings::{initialize_embedding_provider, EmbeddingConfig, EMBEDDING_CLIENT},
     error::ServerError,
     server::RustDocsServer,
 };
-use async_openai::{Client as OpenAIClient, config::OpenAIConfig};
+use async_openai::{config::OpenAIConfig, Client as OpenAIClient};
 use clap::Parser;
+use rmcp::{transport::io::stdio, ServiceExt};
 use std::env;
-use rmcp::{
-    transport::io::stdio,
-    ServiceExt,
-};
 
 use std::collections::HashMap;
 
@@ -66,7 +63,10 @@ async fn main() -> Result<(), ServerError> {
             println!("Use the 'populate_db' tool to add crates first:");
             println!("  cargo run --bin populate_db -- <crate_name>");
         } else {
-            println!("{:<20} {:<15} {:<10} {:<10} {:<20}", "Crate", "Version", "Docs", "Tokens", "Last Updated");
+            println!(
+                "{:<20} {:<15} {:<10} {:<10} {:<20}",
+                "Crate", "Version", "Docs", "Tokens", "Last Updated"
+            );
             println!("{:-<80}", "");
             for stat in stats {
                 println!(
@@ -85,21 +85,29 @@ async fn main() -> Result<(), ServerError> {
     // Load crates from database configuration
     eprintln!("Loading crate configurations from database...");
     let crate_configs = db.get_crate_configs(true).await?; // Only enabled crates
-    
+
     if crate_configs.is_empty() {
         eprintln!("No enabled crates configured in database.");
         eprintln!("Configure crates using the HTTP server's add_crate tool.");
-        return Err(ServerError::Config("No crates configured in database.".to_string()));
+        return Err(ServerError::Config(
+            "No crates configured in database.".to_string(),
+        ));
     }
 
     // Determine which crates to load
     let crate_names: Vec<String> = if cli.all {
         eprintln!("Loading all enabled crates from database configuration...");
-        crate_configs.into_iter().map(|config| config.name).collect()
+        crate_configs
+            .into_iter()
+            .map(|config| config.name)
+            .collect()
     } else if cli.crate_names.is_empty() {
         // Default to all enabled crates if none specified
         eprintln!("No crates specified, loading all enabled crates from configuration...");
-        crate_configs.into_iter().map(|config| config.name).collect()
+        crate_configs
+            .into_iter()
+            .map(|config| config.name)
+            .collect()
     } else {
         // Filter to only requested crates that are in the config
         let requested: std::collections::HashSet<_> = cli.crate_names.into_iter().collect();
@@ -136,7 +144,9 @@ async fn main() -> Result<(), ServerError> {
         }
         eprintln!("\nOr see available crates with:");
         eprintln!("  cargo run --bin rustdocs_mcp_server -- --list");
-        return Err(ServerError::Config(format!("Missing crates: {missing_crates:?}")));
+        return Err(ServerError::Config(format!(
+            "Missing crates: {missing_crates:?}"
+        )));
     }
 
     // Initialize embedding provider (needed for query embedding)
@@ -145,7 +155,9 @@ async fn main() -> Result<(), ServerError> {
 
     let embedding_config = match provider_name.as_str() {
         "openai" => {
-            let model = cli.embedding_model.unwrap_or_else(|| "text-embedding-3-large".to_string());
+            let model = cli
+                .embedding_model
+                .unwrap_or_else(|| "text-embedding-3-large".to_string());
             let openai_client = if let Ok(api_base) = env::var("OPENAI_API_BASE") {
                 let config = OpenAIConfig::new().with_api_base(api_base);
                 OpenAIClient::with_config(config)
@@ -156,13 +168,15 @@ async fn main() -> Result<(), ServerError> {
                 client: openai_client,
                 model,
             }
-        },
+        }
         "voyage" => {
             let api_key = env::var("VOYAGE_API_KEY")
                 .map_err(|_| ServerError::MissingEnvVar("VOYAGE_API_KEY".to_string()))?;
-            let model = cli.embedding_model.unwrap_or_else(|| "voyage-3.5".to_string());
+            let model = cli
+                .embedding_model
+                .unwrap_or_else(|| "voyage-3.5".to_string());
             EmbeddingConfig::VoyageAI { api_key, model }
-        },
+        }
         _ => {
             return Err(ServerError::Config(format!(
                 "Unsupported embedding provider: {provider_name}. Use 'openai' or 'voyage'"
@@ -172,17 +186,19 @@ async fn main() -> Result<(), ServerError> {
 
     let provider = initialize_embedding_provider(embedding_config);
     if EMBEDDING_CLIENT.set(provider).is_err() {
-        return Err(ServerError::Internal("Failed to set embedding provider".to_string()));
+        return Err(ServerError::Internal(
+            "Failed to set embedding provider".to_string(),
+        ));
     }
     eprintln!("✅ {provider_name} embedding provider initialized");
 
     // Check database for configured crates
     eprintln!("📋 Checking database for crate configurations...");
     let db_configs = db.get_crate_configs(false).await?;
-    
+
     if !db_configs.is_empty() {
         eprintln!("  Found {} configured crates in database", db_configs.len());
-        
+
         // Check if any configured crates need population
         let mut needs_population = Vec::new();
         for config in &db_configs {
@@ -190,7 +206,7 @@ async fn main() -> Result<(), ServerError> {
                 needs_population.push(&config.name);
             }
         }
-        
+
         if !needs_population.is_empty() {
             eprintln!("\n⚠️  The following crates are configured but not populated:");
             for crate_name in &needs_population {
@@ -208,7 +224,7 @@ async fn main() -> Result<(), ServerError> {
     let crate_count = crate_names.len();
     eprintln!("🔍 Verifying {crate_count} crates are available in database...");
     let mut crate_stats = HashMap::new();
-    
+
     for crate_name in &crate_names {
         let stats = db.get_crate_stats().await?;
         let crate_stat = stats.iter().find(|s| &s.name == crate_name);
@@ -222,7 +238,7 @@ async fn main() -> Result<(), ServerError> {
     }
 
     let total_available_docs: i64 = crate_stats.values().map(|&v| v as i64).sum();
-    
+
     eprintln!("\n📊 Database Summary:");
     eprintln!("  📚 Total available documents: {total_available_docs}");
     eprintln!("  🗄️  Database-driven search (no memory loading)");
