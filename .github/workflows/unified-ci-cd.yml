@@ -431,11 +431,14 @@ jobs:
 
       - name: Create binary archive
         run: |
+          # Use the same target directory as specified in CARGO_TARGET_DIR
+          TARGET_DIR="/cache/target"
+          
           mkdir -p dist
-          cp target/${{ matrix.target }}/release/rustdocs_mcp_server* dist/
-          cp target/${{ matrix.target }}/release/populate_* dist/
-          cp target/${{ matrix.target }}/release/add_crate dist/
-          cp target/${{ matrix.target }}/release/backfill_versions dist/
+          cp ${TARGET_DIR}/${{ matrix.target }}/release/rustdocs_mcp_server* dist/
+          cp ${TARGET_DIR}/${{ matrix.target }}/release/populate_* dist/
+          cp ${TARGET_DIR}/${{ matrix.target }}/release/add_crate dist/
+          cp ${TARGET_DIR}/${{ matrix.target }}/release/backfill_versions dist/
           
           cd dist
           tar czf rustdocs-mcp-${{ matrix.target }}.tar.gz *
