@@ -179,7 +179,7 @@ postgresql:
   image:
     registry: "ghcr.io"
     repository: "5dlabs/rust-docs-postgresql"
-    tag: "feature-clippy-fixes-and-cicd"
+    tag: "latest"
     pullPolicy: "Always"
   imagePullSecrets:
     - name: ghcr-secret
