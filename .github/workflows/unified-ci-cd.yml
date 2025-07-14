@@ -338,26 +338,19 @@ jobs:
 
   # Build binaries
   build-binaries:
-    needs: [version, lint-rust, test-rust, lint-rust-retry]
+    needs: [version, changes]
     if: always() && !cancelled() && (needs.changes.outputs.server == 'true' || needs.changes.outputs.binaries == 'true' || github.event_name == 'push')
     runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
         include:
-          # Native compilation
+          # Native compilation on self-hosted
           - target: x86_64-unknown-linux-gnu
             runner: [self-hosted, rust-builder]
             extension: ""
-          # Cross-compilation targets
+          # Simplified cross-compilation - just ARM64 Linux on self-hosted
           - target: aarch64-unknown-linux-gnu
             runner: [self-hosted, rust-builder]
-            extension: ""
-          # Use GitHub-hosted runners for Apple targets to avoid conflicts
-          - target: x86_64-apple-darwin
-            runner: ubuntu-latest
-            extension: ""
-          - target: aarch64-apple-darwin
-            runner: ubuntu-latest
             extension: ""
     permissions:
       contents: write
@@ -367,41 +360,28 @@ jobs:
       - name: Setup Rust environment
         run: |
           echo "🚀 Setting up Rust build environment..."
+          echo "Runner: ${{ matrix.runner }}"
+          echo "Target: ${{ matrix.target }}"
           
-          # Handle different runner types
-          if [[ "${{ matrix.runner }}" == *"self-hosted"* ]]; then
-            echo "📦 Using self-hosted rust-builder runner"
-            # Add cargo bin to PATH for self-hosted runners
-            echo "/home/runner/.cargo/bin" >> $GITHUB_PATH
-            export PATH="/home/runner/.cargo/bin:$PATH"
-            
-            # Set up Rust toolchain
-            rustup default stable
-            rustup update stable
-            
-            # Verify pre-installed tools
-            echo "🔍 Verifying pre-installed tools..."
-            rustc --version
-            cargo --version
-            sccache --version || echo "⚠️ sccache not found"
-            mold --version || echo "⚠️ mold not found"
-            
-            # Show available resources
-            echo "💾 Available resources:"
-            echo "CPU cores: $(nproc)"
-            echo "Memory: $(free -h | grep '^Mem:' | awk '{print $2}')"
-          else
-            echo "☁️ Using GitHub-hosted runner"
-            # Install Rust on GitHub-hosted runners
-            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-            source ~/.cargo/env
-            echo "~/.cargo/bin" >> $GITHUB_PATH
-            export PATH="~/.cargo/bin:$PATH"
-            
-            rustup default stable
-            rustup update stable
-            echo "Rust version: $(rustc --version)"
-          fi
+          # Add cargo bin to PATH for self-hosted runners
+          echo "/home/runner/.cargo/bin" >> $GITHUB_PATH
+          export PATH="/home/runner/.cargo/bin:$PATH"
+          
+          # Set up Rust toolchain
+          rustup default stable
+          rustup update stable
+          
+          # Verify pre-installed tools
+          echo "🔍 Verifying pre-installed tools..."
+          rustc --version
+          cargo --version
+          sccache --version || echo "⚠️ sccache not found"
+          mold --version || echo "⚠️ mold not found"
+          
+          # Show available resources
+          echo "💾 Available resources:"
+          echo "CPU cores: $(nproc)"
+          echo "Memory: $(free -h | grep '^Mem:' | awk '{print $2}')"
 
       - name: Setup cross-compilation tools
         if: matrix.target != 'x86_64-unknown-linux-gnu'
@@ -413,26 +393,8 @@ jobs:
           
           # Add target
           rustup target add ${{ matrix.target }}
-          
-          # Install cross-compilation tools if needed
-          if [[ "${{ matrix.target }}" == *"apple-darwin"* ]]; then
-            echo "🍎 macOS cross-compilation support needed"
-            # For GitHub-hosted runners, we may need additional tools
-            if [[ "${{ matrix.runner }}" == "ubuntu-latest" ]]; then
-              echo "Installing cross-compilation dependencies..."
-              # Cross-compilation will work with just the target for simple binaries
-            fi
-          elif [[ "${{ matrix.target }}" == "aarch64-unknown-linux-gnu" ]]; then
-            echo "🔧 ARM64 Linux cross-compilation"
-            # Install cross-compilation tools for ARM64 if on GitHub-hosted
-            if [[ "${{ matrix.runner }}" == "ubuntu-latest" ]]; then
-              sudo apt-get update
-              sudo apt-get install -y gcc-aarch64-linux-gnu
-            fi
-          fi
 
       - name: Setup sccache
-        if: contains(matrix.runner, 'self-hosted')
         run: |
           echo "🗄️ Setting up sccache..."
           export SCCACHE_CACHE_SIZE="50G"
@@ -449,16 +411,10 @@ jobs:
       - name: Build binaries
         env:
           CARGO_INCREMENTAL: "0"
-          RUSTC_WRAPPER: ${{ contains(matrix.runner, 'self-hosted') && 'sccache' || '' }}
-          CARGO_TARGET_DIR: ${{ contains(matrix.runner, 'self-hosted') && '/cache/target' || 'target' }}
+          RUSTC_WRAPPER: sccache
+          CARGO_TARGET_DIR: /cache/target
         run: |
           echo "🏗️ Building for ${{ matrix.target }}..."
-          
-          # Set cross-compilation environment for ARM64 Linux
-          if [[ "${{ matrix.target }}" == "aarch64-unknown-linux-gnu" && "${{ matrix.runner }}" == "ubuntu-latest" ]]; then
-            export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc
-            export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
-          fi
 
           # Build all binaries
           cargo build --release --target ${{ matrix.target }} \
@@ -469,11 +425,9 @@ jobs:
             --bin add_crate \
             --bin backfill_versions
 
-          # Show sccache stats if available
-          if command -v sccache &> /dev/null; then
-            echo "📊 Final sccache stats:"
-            sccache --show-stats
-          fi
+          # Show sccache stats
+          echo "📊 Final sccache stats:"
+          sccache --show-stats
 
       - name: Create binary archive
         run: |
@@ -495,7 +449,7 @@ jobs:
 
   # Build Docker images
   build-docker:
-    needs: [version, build-binaries]
+    needs: [version, build-binaries, changes]
     if: needs.changes.outputs.docker == 'true' || github.event_name == 'push'
     runs-on: [self-hosted, rust-builder]
     permissions:
@@ -653,7 +607,7 @@ jobs:
 
   # Automatic versioning and tagging (only on main branch)
   auto-version:
-    needs: [version, build-binaries, test-helm]
+    needs: [version, build-binaries, test-helm, changes]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
