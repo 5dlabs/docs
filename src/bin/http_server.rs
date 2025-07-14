@@ -28,8 +28,32 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::{convert::Infallible, env, net::SocketAddr, sync::Arc};
 use tokio_util::sync::CancellationToken;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tracing::{info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+
+#[derive(Clone)]
+struct ReadinessState {
+    database_connected: Arc<AtomicBool>,
+    embedding_initialized: Arc<AtomicBool>,
+    auto_population_complete: Arc<AtomicBool>,
+}
+
+impl ReadinessState {
+    fn new() -> Self {
+        Self {
+            database_connected: Arc::new(AtomicBool::new(false)),
+            embedding_initialized: Arc::new(AtomicBool::new(false)),
+            auto_population_complete: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    fn is_ready(&self) -> bool {
+        self.database_connected.load(Ordering::Relaxed)
+            && self.embedding_initialized.load(Ordering::Relaxed)
+            && self.auto_population_complete.load(Ordering::Relaxed)
+    }
+}
 
 #[derive(Parser, Debug)]
 #[command(author, version, about = "Rust documentation MCP server with HTTP SSE transport", long_about = None)]
@@ -655,25 +679,58 @@ impl McpHandler {
     }
 }
 
-// Simple health check handler
-async fn health_handler(
-    req: Request<hyper::body::Incoming>,
-) -> Result<Response<String>, Infallible> {
-    match (req.method(), req.uri().path()) {
-        (&Method::GET, "/health") => {
-            let response = Response::builder()
-                .status(StatusCode::OK)
-                .header("Content-Type", "application/json")
-                .body(r#"{"status":"healthy","service":"rustdocs-mcp-server"}"#.to_string())
-                .unwrap();
-            Ok(response)
-        }
-        _ => {
-            let response = Response::builder()
-                .status(StatusCode::NOT_FOUND)
-                .body("Not Found".to_string())
-                .unwrap();
-            Ok(response)
+// Health check handler with liveness and readiness endpoints
+fn create_health_handler(readiness_state: ReadinessState) -> impl Fn(Request<hyper::body::Incoming>) -> Result<Response<String>, Infallible> + Clone {
+    move |req: Request<hyper::body::Incoming>| -> Result<Response<String>, Infallible> {
+        match (req.method(), req.uri().path()) {
+            (&Method::GET, "/health/live") => {
+                // Liveness: Just check if the process is alive (always returns OK)
+                let response = Response::builder()
+                    .status(StatusCode::OK)
+                    .header("Content-Type", "application/json")
+                    .body(r#"{"status":"alive","service":"rustdocs-mcp-server"}"#.to_string())
+                    .unwrap();
+                Ok(response)
+            }
+            (&Method::GET, "/health/ready") => {
+                // Readiness: Check if all initialization is complete
+                if readiness_state.is_ready() {
+                    let response = Response::builder()
+                        .status(StatusCode::OK)
+                        .header("Content-Type", "application/json")
+                        .body(r#"{"status":"ready","service":"rustdocs-mcp-server"}"#.to_string())
+                        .unwrap();
+                    Ok(response)
+                } else {
+                    let response = Response::builder()
+                        .status(StatusCode::SERVICE_UNAVAILABLE)
+                        .header("Content-Type", "application/json")
+                        .body(format!(
+                            r#"{{"status":"not_ready","service":"rustdocs-mcp-server","database_connected":{},"embedding_initialized":{},"auto_population_complete":{}}}"#,
+                            readiness_state.database_connected.load(Ordering::Relaxed),
+                            readiness_state.embedding_initialized.load(Ordering::Relaxed),
+                            readiness_state.auto_population_complete.load(Ordering::Relaxed)
+                        ))
+                        .unwrap();
+                    Ok(response)
+                }
+            }
+            (&Method::GET, "/health") => {
+                // Legacy endpoint - redirect to liveness
+                let response = Response::builder()
+                    .status(StatusCode::OK)
+                    .header("Content-Type", "application/json")
+                    .body(r#"{"status":"alive","service":"rustdocs-mcp-server","note":"Use /health/live or /health/ready for specific checks"}"#.to_string())
+                    .unwrap();
+                Ok(response)
+            }
+            _ => {
+                let response = Response::builder()
+                    .status(StatusCode::NOT_FOUND)
+                    .body("Not Found".to_string())
+                    .unwrap();
+                Ok(response)
+            }
         }
     }
 }
@@ -699,9 +756,39 @@ async fn main() -> Result<(), ServerError> {
     let port = cli.port;
     info!("🚀 Starting Rust Docs MCP HTTP SSE Server on {host}:{port}");
 
+    // Create readiness state for health checks
+    let readiness_state = ReadinessState::new();
+
+    // Start health check server early (before auto-population)
+    let health_addr: SocketAddr = format!("{host}:8080")
+        .parse()
+        .map_err(|e| ServerError::Config(format!("Invalid health bind address: {e}")))?;
+    
+    info!("🏥 Starting health server on {health_addr}");
+    let health_handler = create_health_handler(readiness_state.clone());
+    tokio::spawn(async move {
+        let listener = tokio::net::TcpListener::bind(health_addr).await.unwrap();
+        loop {
+            let (stream, _) = listener.accept().await.unwrap();
+            let io = TokioIo::new(stream);
+            let handler = health_handler.clone();
+
+            tokio::task::spawn(async move {
+                if let Err(err) = Builder::new(TokioExecutor::new())
+                    .serve_connection(io, service_fn(move |req| async move { handler(req) }))
+                    .await
+                {
+                    tracing::error!("Health server connection error: {}", err);
+                }
+            });
+        }
+    });
+    info!("✅ Health server started - liveness available at /health/live");
+
     // Initialize database connection
     info!("🔌 Connecting to database...");
     let db = Database::new().await?;
+    readiness_state.database_connected.store(true, Ordering::Relaxed);
     info!("✅ Database connected successfully");
 
     // Load crates from database configuration
@@ -785,6 +872,7 @@ async fn main() -> Result<(), ServerError> {
             "Failed to set embedding provider".to_string(),
         ));
     }
+    readiness_state.embedding_initialized.store(true, Ordering::Relaxed);
     info!("✅ {provider_name} embedding provider initialized");
 
     // Auto-populate missing crates during startup
@@ -852,7 +940,13 @@ async fn main() -> Result<(), ServerError> {
                 missing_crates
             );
         }
+    } else {
+        info!("✅ No missing crates - auto-population not needed");
     }
+
+    // Mark auto-population as complete (whether successful or not)
+    readiness_state.auto_population_complete.store(true, Ordering::Relaxed);
+    info!("✅ Auto-population phase complete - service ready");
 
     // Get crate statistics for startup message (only for available crates)
     let stats = db.get_crate_stats().await?;
@@ -934,33 +1028,10 @@ async fn main() -> Result<(), ServerError> {
         ct: CancellationToken::new(),
     };
 
-    // Setup health check server on port 8080 (standard health port)
-    let health_addr: SocketAddr = format!("{host}:8080")
-        .parse()
-        .map_err(|e| ServerError::Config(format!("Invalid health bind address: {e}")))?;
-
     info!("🌐 Starting MCP server on {bind_addr}");
     info!("📡 SSE endpoint: http://{bind_addr}/sse");
     info!("📤 POST endpoint: http://{bind_addr}/message");
-    info!("🏥 Health endpoint: http://{health_addr}/health");
-
-    // Start health check server
-    tokio::spawn(async move {
-        let listener = tokio::net::TcpListener::bind(health_addr).await.unwrap();
-        loop {
-            let (stream, _) = listener.accept().await.unwrap();
-            let io = TokioIo::new(stream);
-
-            tokio::task::spawn(async move {
-                if let Err(err) = Builder::new(TokioExecutor::new())
-                    .serve_connection(io, service_fn(health_handler))
-                    .await
-                {
-                    tracing::error!("Health server connection error: {}", err);
-                }
-            });
-        }
-    });
+    info!("🏥 Health endpoints: /health/live (liveness), /health/ready (readiness)");
 
     // Create and serve SSE server
     let mut sse_server = SseServer::serve_with_config(config)

@@ -41,7 +41,7 @@ ENV PORT=3000
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD curl -f http://localhost:8080/health || exit 1
+  CMD curl -f http://localhost:8080/health/live || exit 1
 
 # Set entrypoint and default command
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
