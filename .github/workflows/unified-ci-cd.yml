@@ -8,7 +8,7 @@ name: Unified CI/CD
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, 'fix/**', 'feature/**' ]
     tags: [ 'v*' ]
   pull_request:
     branches: [ main ]
