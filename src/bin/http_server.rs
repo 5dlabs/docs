@@ -125,7 +125,9 @@ impl McpHandler {
                 );
 
                 if documents.is_empty() {
-                    return Err(ServerError::Config(format!("No documents found for crate: {crate_name}")));
+                    return Err(ServerError::Config(format!(
+                        "No documents found for crate: {crate_name}"
+                    )));
                 }
 
                 // Generate embeddings
@@ -194,8 +196,10 @@ impl McpHandler {
                     }
                 }))
             })
-        }).await.map_err(|e| ServerError::Internal(format!("Task join error: {e}")))?;
-        
+        })
+        .await
+        .map_err(|e| ServerError::Internal(format!("Task join error: {e}")))?;
+
         result
     }
 }
@@ -482,7 +486,9 @@ impl McpHandler {
                             eprintln!("✅ Background population completed for crate: {crate_name}");
                         }
                         Err(e) => {
-                            eprintln!("⚠️  Background population failed for crate {crate_name}: {e}");
+                            eprintln!(
+                                "⚠️  Background population failed for crate {crate_name}: {e}"
+                            );
                         }
                     }
                 });

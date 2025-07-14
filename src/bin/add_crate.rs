@@ -47,7 +47,7 @@ struct CrateConfig {
 
 async fn scan_crate_docs_count(crate_name: &str, max_pages: usize) -> Result<usize, ServerError> {
     println!("🔍 Scanning docs.rs to estimate document count for: {crate_name}");
-    
+
     let base_url = format!("https://docs.rs/{crate_name}/latest/{crate_name}/");
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(30))
@@ -75,7 +75,9 @@ async fn scan_crate_docs_count(crate_name: &str, max_pages: usize) -> Result<usi
 
     while let Some(url) = to_visit.pop_front() {
         if processed >= max_pages {
-            println!("⚠️  Reached scan limit of {max_pages} pages, found {doc_pages_found} docs so far");
+            println!(
+                "⚠️  Reached scan limit of {max_pages} pages, found {doc_pages_found} docs so far"
+            );
             break;
         }
 
@@ -177,7 +179,9 @@ async fn scan_crate_docs_count(crate_name: &str, max_pages: usize) -> Result<usi
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
 
-    println!("✅ Scan complete: found {doc_pages_found} documentation pages in {processed} total pages");
+    println!(
+        "✅ Scan complete: found {doc_pages_found} documentation pages in {processed} total pages"
+    );
     Ok(doc_pages_found)
 }
 
@@ -292,9 +296,12 @@ async fn main() -> Result<(), ServerError> {
     fs::write(config_path, updated_content)
         .map_err(|e| ServerError::Config(format!("Failed to write {config_path}: {e}")))?;
 
-    println!("✅ Successfully added/updated '{}' in proxy-config.json", cli.crate_name);
+    println!(
+        "✅ Successfully added/updated '{}' in proxy-config.json",
+        cli.crate_name
+    );
     println!("📊 Expected documents: {expected_docs}");
-    
+
     // Optional: Show current database stats for this crate
     if let Ok(db) = Database::new().await {
         if let Ok(current_count) = db.count_crate_documents(&cli.crate_name).await {
