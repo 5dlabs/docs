@@ -613,6 +613,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: write
     outputs:
       new-tag: ${{ steps.version.outputs.new-tag }}
       should-release: ${{ steps.version.outputs.should-release }}
