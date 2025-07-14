@@ -103,7 +103,6 @@ Cursor connects to the MCP server via HTTP/SSE from your local machine, regardle
   "mcpServers": {
     "rust-docs": {
       "url": "http://localhost:3000",
-      "transport": "sse",
       "description": "Rust crate documentation with semantic search"
     }
   }
@@ -115,8 +114,7 @@ Cursor connects to the MCP server via HTTP/SSE from your local machine, regardle
 {
   "mcpServers": {
     "rust-docs": {
-      "url": "http://your-k8s-cluster-ip:3000",
-      "transport": "sse"
+      "url": "http://your-k8s-cluster-ip:3000"
     }
   }
 }
@@ -132,10 +130,10 @@ Cursor connects to the MCP server via HTTP/SSE from your local machine, regardle
 1. **Add the server**:
 ```bash
 # For local server
-claude mcp add rust-docs http://localhost:3000 --transport sse
+claude mcp add rust-docs http://localhost:3000
 
 # If server is deployed on Kubernetes  
-claude mcp add rust-docs http://your-k8s-cluster-ip:3000 --transport sse
+claude mcp add rust-docs http://your-k8s-cluster-ip:3000
 ```
 
 2. **Verify the connection**:
