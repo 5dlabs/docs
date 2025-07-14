@@ -493,11 +493,7 @@ impl McpHandler {
                     }
                 });
 
-                let response = format!(
-                    "✅ Crate {} ({}) configured successfully!\n\n📋 Status: Population started in background\n🔍 Use check_crate_status tool to monitor progress\n⚡ Crate will be available for queries once population completes",
-                    args.crate_name, args.version_spec
-                );
-                info!("📤 add_crate returning response for: {}", args.crate_name);
+                let response = "Ingestion has started".to_string();
                 Ok(CallToolResult::success(vec![Content::text(response)]))
             }
             Err(e) => Err(McpError::internal_error(
