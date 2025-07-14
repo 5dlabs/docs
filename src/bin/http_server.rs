@@ -1,5 +1,8 @@
 use async_openai::{config::OpenAIConfig, Client as OpenAIClient};
 use clap::Parser;
+use hyper::{service::service_fn, Method, Request, Response, StatusCode};
+use hyper_util::rt::{TokioExecutor, TokioIo};
+use hyper_util::server::conn::auto::Builder;
 use ndarray::Array1;
 use rmcp::{
     model::{
@@ -23,7 +26,7 @@ use rustdocs_mcp_server::{
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::{env, net::SocketAddr, sync::Arc};
+use std::{convert::Infallible, env, net::SocketAddr, sync::Arc};
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -652,6 +655,29 @@ impl McpHandler {
     }
 }
 
+// Simple health check handler
+async fn health_handler(
+    req: Request<hyper::body::Incoming>,
+) -> Result<Response<String>, Infallible> {
+    match (req.method(), req.uri().path()) {
+        (&Method::GET, "/health") => {
+            let response = Response::builder()
+                .status(StatusCode::OK)
+                .header("Content-Type", "application/json")
+                .body(r#"{"status":"healthy","service":"rustdocs-mcp-server"}"#.to_string())
+                .unwrap();
+            Ok(response)
+        }
+        _ => {
+            let response = Response::builder()
+                .status(StatusCode::NOT_FOUND)
+                .body("Not Found".to_string())
+                .unwrap();
+            Ok(response)
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), ServerError> {
     // Initialize tracing
@@ -908,9 +934,33 @@ async fn main() -> Result<(), ServerError> {
         ct: CancellationToken::new(),
     };
 
-    info!("🌐 Starting SSE server on {bind_addr}");
+    // Setup health check server on port 8080 (standard health port)
+    let health_addr: SocketAddr = format!("{host}:8080")
+        .parse()
+        .map_err(|e| ServerError::Config(format!("Invalid health bind address: {e}")))?;
+
+    info!("🌐 Starting MCP server on {bind_addr}");
     info!("📡 SSE endpoint: http://{bind_addr}/sse");
     info!("📤 POST endpoint: http://{bind_addr}/message");
+    info!("🏥 Health endpoint: http://{health_addr}/health");
+
+    // Start health check server
+    tokio::spawn(async move {
+        let listener = tokio::net::TcpListener::bind(health_addr).await.unwrap();
+        loop {
+            let (stream, _) = listener.accept().await.unwrap();
+            let io = TokioIo::new(stream);
+
+            tokio::task::spawn(async move {
+                if let Err(err) = Builder::new(TokioExecutor::new())
+                    .serve_connection(io, service_fn(health_handler))
+                    .await
+                {
+                    tracing::error!("Health server connection error: {}", err);
+                }
+            });
+        }
+    });
 
     // Create and serve SSE server
     let mut sse_server = SseServer::serve_with_config(config)

@@ -76,21 +76,19 @@ resources:
     cpu: 100m
     memory: 256Mi
 
-# livenessProbe disabled until health endpoint is implemented
-# livenessProbe:
-#   httpGet:
-#     path: /health
-#     port: http
-#   initialDelaySeconds: 30
-#   periodSeconds: 10
+livenessProbe:
+  httpGet:
+    path: /health
+    port: 8080
+  initialDelaySeconds: 30
+  periodSeconds: 10
 
-# readinessProbe disabled until health endpoint is implemented
-# readinessProbe:
-#   httpGet:
-#     path: /health
-#     port: http
-#   initialDelaySeconds: 5
-#   periodSeconds: 5
+readinessProbe:
+  httpGet:
+    path: /health
+    port: 8080
+  initialDelaySeconds: 5
+  periodSeconds: 5
 
 autoscaling:
   enabled: false
