@@ -1,0 +1,42 @@
+# Git
+.git
+.gitignore
+
+# Build artifacts
+target/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env files
+.env
+.env.local
+
+# Docs
+*.md
+docs/
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+
+# Test files
+test_*.sh
+*.test
+
+# MCP config
+.mcp.json
+claude-desktop-config.json
+
+# Helm charts
+helm/
+
+# Scripts
+scripts/

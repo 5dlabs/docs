@@ -1,0 +1,90 @@
+[package]
+name = "rustdocs_mcp_server"
+version = "2.0.0"
+edition = "2021"
+authors = ["Your Name <your.email@example.com>"]
+description = "MCP server for Rust crate documentation with vector search"
+license = "MIT"
+repository = "https://github.com/yourusername/rust-docs-mcp-server"
+
+[lib]
+name = "rustdocs_mcp_server"
+path = "src/lib.rs"
+
+# Add a second binary target for the proxy
+[[bin]]
+name = "rustdocs_mcp_server"
+path = "src/main.rs"
+
+[[bin]]
+name = "populate_db"
+path = "src/bin/populate_db.rs"
+
+[[bin]]
+name = "populate_all"
+path = "src/bin/populate_all.rs"
+
+[[bin]]
+name = "backfill_versions"
+path = "src/bin/backfill_versions.rs"
+
+
+[[bin]]
+name = "rustdocs_mcp_server_http"
+path = "src/bin/http_server.rs"
+
+[[bin]]
+name = "migrate_config"
+path = "src/bin/migrate_config.rs"
+
+
+[dependencies]
+rmcp = { version = "0.1.5", features = ["transport-io", "macros", "server", "transport-sse", "transport-sse-server"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "io-util"] }
+tokio-util = "0.7"
+reqwest = { version = "0.12.12", default-features = false, features = ["json", "rustls-tls"] }
+dotenvy = "0.15"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2.0.12"
+walkdir = "2.5.0"
+scraper = "0.23.1"
+ndarray = { version = "0.16.1", features = ["serde"] } # Enable serde feature
+async-openai = "0.29.0"
+async-trait = "0.1.88"
+futures = "0.3"
+bincode = { version = "2.0.1", features = ["serde"] } # Enable serde integration
+tiktoken-rs = "0.7.0"
+tempfile = "3.19.1"
+anyhow = "1.0.97"
+schemars = "0.8.22"
+clap = { version = "4.5.34", features = ["cargo", "derive", "env"] }
+regex = "1.11.1"
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "postgres", "macros", "chrono", "uuid"] }
+pgvector = { version = "0.4", features = ["sqlx"] }
+chrono = "0.4"
+axum = { version = "0.8.4", features = ["http2", "json", "tokio"] }
+hyper = { version = "1.6.0", features = ["full"] }
+tower = { version = "0.5.2", features = ["full"] }
+tower-http = { version = "0.6.2", features = ["cors", "trace"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+
+# --- Platform Specific Dependencies ---
+
+[target.'cfg(not(target_os = "windows"))'.dependencies]
+xdg = { version = "3.0.0", features = ["serde"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+dirs = "6.0.0"
+
+
+# Optimize release builds for size
+[profile.release]
+opt-level = "z"  # Optimize for size
+lto = true         # Enable Link Time Optimization
+codegen-units = 1  # Maximize size reduction opportunities
+panic = "abort"    # Abort on panic to remove unwinding code
+strip = true       # Strip symbols from binary
+

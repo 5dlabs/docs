@@ -1,0 +1,393 @@
+{
+  "rustdocs_binary_path": "rustdocs_mcp_server",
+  "crates": [
+    {
+      "name": "anthropic",
+      "features": null,
+      "enabled": true,
+      "expected_docs": 44
+    },
+    {
+      "name": "anyhow",
+      "features": null,
+      "enabled": true,
+      "expected_docs": 12
+    },
+    {
+      "name": "async-trait",
+      "features": null,
+      "enabled": true
+    },
+    {
+      "name": "atomicwrites",
+      "features": null,
+      "enabled": true,
+      "expected_docs": 6
+    },
+    {
+      "name": "axum",
+      "features": null,
+      "enabled": true,
+      "expected_docs": 51
+    },
+    {
+      "name": "cargo-release",
+      "features": null,
+      "enabled": true
+    },
+    {
+      "name": "cargo-udeps",
+      "features": null,
+      "enabled": true
+    },
+    {
+      "name": "chrono",
+      "features": [
+        "serde"
+      ],
+      "enabled": true,
+      "expected_docs": 51
+    },
+    {
+      "name": "clap",
+      "features": null,
+      "enabled": true,
+      "expected_docs": 198
+    },
+    {
+      "name": "colored",
+      "features": null,
+      "enabled": true,
+      "expected_docs": 11
+    },
+    {
+      "name": "config",
+      "features": null,
+      "enabled": true,
+      "expected_docs": 27
+    },
+    {
+      "name": "dialoguer",
+      "features": null,
+      "enabled": true,
+      "expected_docs": 20
+    },
+    {
+      "name": "eventsource-client",
+      "features": null,
+      "enabled": true
+    },
+    {
+      "name": "flamegraph",
+      "features": null,
+      "enabled": true,
+      "expected_docs": 4
+    },
+    {
+      "name": "futures",
+      "features": null,
+      "enabled": true
+    },
+    {
+      "name": "futures-util",
+      "features": null,
+      "enabled": true
+    },
+    {
+      "name": "handlebars",
+      "features": null,
+      "enabled": true,
+      "expected_docs": 50
+    },
+    {
+      "name": "http",
+      "features": null,
+      "enabled": true,
+      "expected_docs": 18
+    },
+    {
+      "name": "hyper",
+      "features": null,
+      "enabled": true,
+      "expected_docs": 55
+    },
+    {
+      "name": "indicatif",
+      "features": null,
+      "enabled": true,
+      "expected_docs": 22
+    },
+    {
+      "name": "k8s-openapi",
+      "features": [
+        "v1_30"
+      ],
+      "enabled": true
+    },
+    {
+      "name": "kube",
+      "features": [
+        "runtime",
+        "derive",
+        "client",
+        "ws"
+      ],
+      "enabled": true,
+      "expected_docs": 50
+    },
+    {
+      "name": "mcp-core",
+      "features": null,
+      "enabled": true
+    },
+    {
+      "name": "mdbook",
+      "features": null,
+      "enabled": true,
+      "expected_docs": 33
+    },
+    {
+      "name": "mockall",
+      "features": null,
+      "enabled": true,
+      "expected_docs": 39
+    },
+    {
+      "name": "opentelemetry",
+      "features": null,
+      "enabled": true,
+      "expected_docs": 53
+    },
+    {
+      "name": "opentelemetry-otlp",
+      "features": [
+        "tonic"
+      ],
+      "enabled": true
+    },
+    {
+      "name": "opentelemetry_sdk",
+      "features": [
+        "rt-tokio"
+      ],
+      "enabled": true,
+      "expected_docs": 48
+    },
+    {
+      "name": "port-check",
+      "features": null,
+      "enabled": true
+    },
+    {
+      "name": "prometheus",
+      "features": null,
+      "enabled": true,
+      "expected_docs": 52
+    },
+    {
+      "name": "prost",
+      "features": null,
+      "enabled": true,
+      "expected_docs": 12
+    },
+    {
+      "name": "rand",
+      "features": null,
+      "enabled": true,
+      "expected_docs": 51
+    },
+    {
+      "name": "redis",
+      "features": [
+        "tokio-comp"
+      ],
+      "enabled": true,
+      "expected_docs": 55
+    },
+    {
+      "name": "regex",
+      "features": null,
+      "enabled": true,
+      "expected_docs": 26
+    },
+    {
+      "name": "reqwest",
+      "features": [
+        "json",
+        "rustls-tls"
+      ],
+      "enabled": true,
+      "expected_docs": 31
+    },
+    {
+      "name": "rmcp",
+      "features": [
+        "transport-io",
+        "macros",
+        "server",
+        "client",
+        "tower",
+        "transport-child-process",
+        "transport-sse",
+        "transport-sse-server"
+      ],
+      "enabled": true,
+      "expected_docs": 463
+    },
+    {
+      "name": "rust-mcp-schema",
+      "features": null,
+      "enabled": true
+    },
+    {
+      "name": "serde",
+      "features": null,
+      "enabled": true,
+      "expected_docs": 98
+    },
+    {
+      "name": "serde_json",
+      "features": null,
+      "enabled": true,
+      "expected_docs": 56
+    },
+    {
+      "name": "serde_yaml",
+      "features": null,
+      "enabled": true,
+      "expected_docs": 36
+    },
+    {
+      "name": "solana-program",
+      "features": null,
+      "enabled": true
+    },
+    {
+      "name": "solana-sdk",
+      "features": null,
+      "enabled": true
+    },
+    {
+      "name": "sqlx",
+      "features": [
+        "runtime-tokio-rustls",
+        "postgres",
+        "uuid",
+        "chrono"
+      ],
+      "enabled": true,
+      "expected_docs": 53
+    },
+    {
+      "name": "sqlx-postgres",
+      "features": null,
+      "enabled": true
+    },
+    {
+      "name": "tempfile",
+      "features": null,
+      "enabled": true,
+      "expected_docs": 15
+    },
+    {
+      "name": "thiserror",
+      "features": null,
+      "enabled": true,
+      "expected_docs": 3
+    },
+    {
+      "name": "tokio",
+      "features": null,
+      "enabled": true,
+      "expected_docs": 52
+    },
+    {
+      "name": "tokio-stream",
+      "features": null,
+      "enabled": true
+    },
+    {
+      "name": "tokio-test",
+      "features": null,
+      "enabled": true
+    },
+    {
+      "name": "tokio-tungstenite",
+      "features": null,
+      "enabled": true
+    },
+    {
+      "name": "toml",
+      "features": null,
+      "enabled": true,
+      "expected_docs": 42
+    },
+    {
+      "name": "tonic",
+      "features": null,
+      "enabled": true,
+      "expected_docs": 52
+    },
+    {
+      "name": "tonic-build",
+      "features": null,
+      "enabled": true
+    },
+    {
+      "name": "tonic-reflection",
+      "features": null,
+      "enabled": true
+    },
+    {
+      "name": "tonic-web",
+      "features": null,
+      "enabled": true
+    },
+    {
+      "name": "tower",
+      "features": null,
+      "enabled": true,
+      "expected_docs": 41
+    },
+    {
+      "name": "tower-http",
+      "features": [
+        "cors"
+      ],
+      "enabled": true
+    },
+    {
+      "name": "tracing",
+      "features": null,
+      "enabled": true,
+      "expected_docs": 44
+    },
+    {
+      "name": "tracing-opentelemetry",
+      "features": null,
+      "enabled": true
+    },
+    {
+      "name": "tracing-subscriber",
+      "features": [
+        "env-filter"
+      ],
+      "enabled": true
+    },
+    {
+      "name": "uuid",
+      "features": [
+        "v4",
+        "serde"
+      ],
+      "enabled": true,
+      "expected_docs": 33
+    },
+    {
+      "name": "wiremock",
+      "features": null,
+      "enabled": true,
+      "expected_docs": 55
+    }
+  ]
+}

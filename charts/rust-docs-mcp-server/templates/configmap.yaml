@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "rust-docs-mcp-server.configMapName" . }}
+  labels:
+    {{- include "rust-docs-mcp-server.labels" . | nindent 4 }}
+data:
+  # Application configuration
+  {{- range $key, $value := .Values.app.env }}
+  {{ $key }}: {{ $value | quote }}
+  {{- end }}
+
+  # Database configuration
+  DATABASE_URL: {{ include "rust-docs-mcp-server.databaseUrl" . | quote }}
+
+  # Additional configuration can be added here
+  SERVER_CONFIG: |
+    # Rust Docs MCP Server Configuration
+    # This server provides semantic search across Rust crate documentation
+    # using PostgreSQL with pgvector extension for vector similarity search
+
+    # Available endpoints:
+    # - /sse - Server-Sent Events endpoint for MCP protocol
+    # - /message - HTTP POST endpoint for MCP messages
+    # - /health - Health check endpoint
+
+    # Supported crates are loaded from the database
+    # Use the populate_db or populate_all tools to add crates

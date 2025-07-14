@@ -1,0 +1,26 @@
+build/
+node_modules/
+
+
+# Added by cargo
+
+/target
+.direnv/
+.env
+doc
+.rust*
+debug/
+storage/
+.roo/
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.txt
+*.tmp
+*.bak
+
+# OS files
+.DS_Store

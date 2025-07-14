@@ -1,0 +1,31 @@
+apiVersion: v2
+name: rust-docs-mcp-server
+description: A Helm chart for Rust Docs MCP Server with PostgreSQL and pgvector support
+type: application
+version: 0.1.0
+appVersion: "2.0.0"
+
+home: https://github.com/5dlabs/rust-docs-mcp-server
+sources:
+  - https://github.com/5dlabs/rust-docs-mcp-server
+
+maintainers:
+  - name: 5dlabs MCP Server Team
+    email: adin@5d.ai
+
+keywords:
+  - rust
+  - documentation
+  - mcp
+  - postgresql
+  - vector-search
+
+dependencies:
+  - name: postgresql
+    version: "15.2.5"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: postgresql.enabled
+
+annotations:
+  category: Documentation
+  licenses: MIT

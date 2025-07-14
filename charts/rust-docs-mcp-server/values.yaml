@@ -1,0 +1,338 @@
+# Default values for rust-docs-mcp-server
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+replicaCount: 1
+
+image:
+  repository: ghcr.io/5dlabs/rust-docs
+  pullPolicy: Always
+  # Overrides the image tag whose default is the chart appVersion.
+  tag: ""
+
+imagePullSecrets:
+  - name: ghcr-secret
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  # Specifies whether a service account should be created
+  create: false
+  # Automatically mount a ServiceAccount's API credentials?
+  automount: false
+  # Annotations to add to the service account
+  annotations: {}
+  # The name of the service account to use.
+  # If not set and create is true, a name is generated using the fullname template
+  name: ""
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext:
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+    - ALL
+  readOnlyRootFilesystem: false
+  runAsNonRoot: true
+  runAsUser: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+service:
+  type: ClusterIP
+  port: 3000
+  targetPort: 3000
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+    # kubernetes.io/ingress.class: nginx
+    # kubernetes.io/tls-acme: "true"
+    # nginx.ingress.kubernetes.io/cors-allow-methods: "GET, POST, OPTIONS"
+    # nginx.ingress.kubernetes.io/cors-allow-headers: "DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization"
+  hosts:
+    - host: rust-docs-mcp.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+  #  - secretName: rust-docs-mcp-tls
+  #    hosts:
+  #      - rust-docs-mcp.local
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 1Gi
+  requests:
+    cpu: 100m
+    memory: 256Mi
+
+# livenessProbe disabled until health endpoint is implemented
+# livenessProbe:
+#   httpGet:
+#     path: /health
+#     port: http
+#   initialDelaySeconds: 30
+#   periodSeconds: 10
+
+# readinessProbe disabled until health endpoint is implemented
+# readinessProbe:
+#   httpGet:
+#     path: /health
+#     port: http
+#   initialDelaySeconds: 5
+#   periodSeconds: 5
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 100
+  targetCPUUtilizationPercentage: 80
+  # targetMemoryUtilizationPercentage: 80
+
+# Additional volumes on the output Deployment definition.
+volumes: []
+# - name: foo
+#   secret:
+#     secretName: mysecret
+#     optional: false
+
+# Additional volumeMounts on the output Deployment definition.
+volumeMounts: []
+# - name: foo
+#   mountPath: "/etc/foo"
+#   readOnly: true
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+# NetworkPolicy configuration
+networkPolicy:
+  enabled: false
+
+# Application-specific configuration
+app:
+  # Environment variables for the application
+  env:
+    # Logging configuration
+    RUST_LOG: "rustdocs_mcp_server_http=info,rmcp=info"
+    HOST: "0.0.0.0"
+    PORT: "3000"
+
+    # Embedding provider configuration
+    EMBEDDING_PROVIDER: "openai"
+    EMBEDDING_MODEL: "text-embedding-3-large"
+    LLM_MODEL: "gpt-4o-mini-2024-07-18"
+
+    # OpenAI API configuration (optional)
+    # OPENAI_API_BASE: "https://api.openai.com/v1"
+
+  # Secrets for API keys and database credentials
+  secrets:
+    # OpenAI API key (required if using OpenAI embedding provider)
+    openaiApiKey: ""
+    # Voyage API key (required if using Voyage embedding provider)
+    voyageApiKey: ""
+    # Database password (if not using PostgreSQL subchart)
+    databasePassword: ""
+
+  # Existing secret name containing API keys
+  existingSecret: ""
+
+  # Command line arguments for the server
+  args:
+    - "--all"
+    - "--port"
+    - "3000"
+
+# PostgreSQL configuration using Bitnami chart with custom pgvector image
+postgresql:
+  enabled: true
+  global:
+    storageClass: "local-path"
+  image:
+    registry: "ghcr.io"
+    repository: "5dlabs/rust-docs-postgresql"
+    tag: "feature-clippy-fixes-and-cicd"
+    pullPolicy: "Always"
+  imagePullSecrets:
+    - name: ghcr-secret
+  auth:
+    postgresPassword: "rustdocs123"
+    username: "rustdocs"
+    password: "rustdocs123"
+    database: "rust_docs_vectors"
+  # Disable NetworkPolicy to avoid RBAC permission issues
+  serviceAccount:
+    create: false
+  primary:
+    networkPolicy:
+      enabled: false
+    persistence:
+      enabled: true
+      storageClass: "local-path"
+      size: 8Gi
+    extendedConfiguration: |
+      shared_preload_libraries = 'vector'
+      maintenance_work_mem = '2GB'
+    initdb:
+      scripts:
+        01-create-extension.sh: |
+          #!/bin/bash
+          set -e
+          
+          # Run as superuser to create extension
+          psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
+            CREATE EXTENSION IF NOT EXISTS vector;
+          EOSQL
+        02-init-schema.sql: |
+          -- Schema for Rust documentation vector database
+
+          -- Table to store crate information
+          CREATE TABLE IF NOT EXISTS crates (
+              id SERIAL PRIMARY KEY,
+              name VARCHAR(255) UNIQUE NOT NULL,
+              version VARCHAR(50),
+              last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+              total_docs INTEGER DEFAULT 0,
+              total_tokens INTEGER DEFAULT 0
+          );
+
+          -- Table to store document embeddings
+          CREATE TABLE IF NOT EXISTS doc_embeddings (
+              id SERIAL PRIMARY KEY,
+              crate_id INTEGER REFERENCES crates(id) ON DELETE CASCADE,
+              crate_name VARCHAR(255) NOT NULL, -- Denormalized for faster queries
+              doc_path TEXT NOT NULL,
+              content TEXT NOT NULL,
+              embedding vector(3072), -- OpenAI text-embedding-3-large dimension
+              token_count INTEGER,
+              created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+              UNIQUE(crate_name, doc_path)
+          );
+
+          -- Indexes for performance
+          CREATE INDEX IF NOT EXISTS idx_doc_embeddings_crate_name ON doc_embeddings(crate_name);
+          CREATE INDEX IF NOT EXISTS idx_doc_embeddings_crate_id ON doc_embeddings(crate_id);
+
+          -- Function to search for similar documents
+          CREATE OR REPLACE FUNCTION search_similar_docs(
+              query_embedding vector(3072),
+              target_crate_name VARCHAR(255),
+              limit_results INTEGER DEFAULT 5
+          )
+          RETURNS TABLE (
+              id INTEGER,
+              crate_name VARCHAR(255),
+              doc_path TEXT,
+              content TEXT,
+              similarity FLOAT
+          ) AS $$
+          BEGIN
+              RETURN QUERY
+              SELECT
+                  de.id,
+                  de.crate_name,
+                  de.doc_path,
+                  de.content,
+                  1 - (de.embedding <=> query_embedding) AS similarity
+              FROM doc_embeddings de
+              WHERE de.crate_name = target_crate_name
+              ORDER BY de.embedding <=> query_embedding
+              LIMIT limit_results;
+          END;
+          $$ LANGUAGE plpgsql;
+
+          -- View for crate statistics
+          CREATE OR REPLACE VIEW crate_stats AS
+          SELECT
+              c.id,
+              c.name,
+              c.version,
+              c.last_updated,
+              c.total_docs,
+              c.total_tokens,
+              COUNT(de.id) as actual_docs
+          FROM crates c
+          LEFT JOIN doc_embeddings de ON c.id = de.crate_id
+          GROUP BY c.id, c.name, c.version, c.last_updated, c.total_docs, c.total_tokens;
+
+          -- Table to store crate configurations
+          CREATE TABLE IF NOT EXISTS crate_configs (
+              id SERIAL PRIMARY KEY,
+              name TEXT NOT NULL,
+              version_spec TEXT NOT NULL,
+              current_version TEXT,
+              features TEXT[],
+              expected_docs INTEGER NOT NULL DEFAULT 0,
+              enabled BOOLEAN DEFAULT true,
+              last_checked TIMESTAMPTZ,
+              last_populated TIMESTAMPTZ,
+              created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+              updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+              UNIQUE(name, version_spec)
+          );
+
+          -- Create indexes for crate_configs
+          CREATE INDEX IF NOT EXISTS idx_crate_configs_name ON crate_configs(name);
+          CREATE INDEX IF NOT EXISTS idx_crate_configs_enabled ON crate_configs(enabled);
+
+          -- Table to track population jobs
+          CREATE TABLE IF NOT EXISTS population_jobs (
+              id SERIAL PRIMARY KEY,
+              crate_config_id INTEGER REFERENCES crate_configs(id),
+              status TEXT NOT NULL CHECK (status IN ('pending', 'running', 'completed', 'failed')),
+              started_at TIMESTAMPTZ,
+              completed_at TIMESTAMPTZ,
+              error_message TEXT,
+              docs_populated INTEGER,
+              created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+          );
+
+          -- Create indexes for population_jobs
+          CREATE INDEX IF NOT EXISTS idx_population_jobs_status ON population_jobs(status);
+          CREATE INDEX IF NOT EXISTS idx_population_jobs_crate_config_id ON population_jobs(crate_config_id);
+
+          -- Function to update the updated_at timestamp
+          CREATE OR REPLACE FUNCTION update_updated_at_column()
+          RETURNS TRIGGER AS $$
+          BEGIN
+              NEW.updated_at = CURRENT_TIMESTAMP;
+              RETURN NEW;
+          END;
+          $$ language 'plpgsql';
+
+          -- Create trigger for crate_configs
+          CREATE TRIGGER update_crate_configs_updated_at BEFORE UPDATE
+              ON crate_configs FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+    resources:
+      requests:
+        memory: 256Mi
+        cpu: 100m
+      limits:
+        memory: 1Gi
+        cpu: 500m
+  metrics:
+    enabled: false
+
+# External PostgreSQL configuration (if postgresql.enabled is false)
+externalDatabase:
+  host: "postgres-postgresql.mcp.svc.cluster.local"  # If using external PostgreSQL in mcp namespace
+  port: 5432
+  username: "rustdocs"
+  password: "rustdocs123"  # You should use a secret in production
+  database: "rust_docs_vectors"
+  existingSecret: ""
+  existingSecretPasswordKey: ""

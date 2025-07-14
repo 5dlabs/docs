@@ -1,0 +1,204 @@
+name: Quick Deploy (Test Only)
+
+# TEMPORARY: Quick deployment for testing changes
+# Skips all tests and linting for rapid iteration
+# Will be removed once feature is stable
+
+on:
+  push:
+    branches: [ 'feature/*', 'test/*' ]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_BASE: 5dlabs/rust-docs
+
+jobs:
+  # Quick version determination
+  version:
+    runs-on: [self-hosted, Linux, X64, k8s-runner, rust-builder, org-runner]
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      short-sha: ${{ steps.version.outputs.short-sha }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate quick version
+        id: version
+        run: |
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          TIMESTAMP=$(date +%Y%m%d%H%M%S)
+          VERSION="quick-${TIMESTAMP}-${SHORT_SHA}"
+
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "short-sha=${SHORT_SHA}" >> $GITHUB_OUTPUT
+          echo "timestamp=${TIMESTAMP}" >> $GITHUB_OUTPUT
+          echo "📦 Quick deploy version: ${VERSION}"
+
+  # Build server only (skip binaries for speed)
+  build-server:
+    needs: [version]
+    runs-on: [self-hosted, Linux, X64, k8s-runner, rust-builder, org-runner]
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup optimized Rust environment
+        run: |
+          echo "🚀 Setting up ULTRA-OPTIMIZED Rust build environment..."
+
+          # Add cargo bin to PATH
+          echo "/home/runner/.cargo/bin" >> $GITHUB_PATH
+          export PATH="/home/runner/.cargo/bin:$PATH"
+
+          # Set up Rust toolchain
+          rustup default stable
+          rustup update stable
+
+          # Verify pre-installed tools
+          echo "🔍 Verifying pre-installed tools..."
+          rustc --version
+          cargo --version
+          sccache --version || echo "⚠️ sccache not found"
+          mold --version || echo "⚠️ mold not found"
+
+          # Show available resources
+          echo "💾 Available resources:"
+          echo "CPU cores: $(nproc)"
+          echo "Memory: $(free -h | grep '^Mem:' | awk '{print $2}')"
+
+      - name: Setup sccache
+        run: |
+          echo "🗄️ Setting up sccache for ULTRA-FAST builds..."
+
+          # Configure sccache
+          export SCCACHE_CACHE_SIZE="50G"
+          export SCCACHE_IDLE_TIMEOUT="0"
+
+          # Ensure sccache is running
+          sccache --stop-server 2>/dev/null || true
+          sccache --start-server
+
+          echo "📊 Initial sccache stats:"
+          sccache --show-stats
+
+      - name: Build release binaries (ultra-fast)
+        env:
+          CARGO_INCREMENTAL: "0"
+          RUSTC_WRAPPER: "sccache"
+          SCCACHE_CACHE_SIZE: "50G"
+          SCCACHE_IDLE_TIMEOUT: "0"
+          CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+          CARGO_REGISTRIES_CRATES_IO_PROTOCOL: "sparse"
+          CARGO_TARGET_DIR: "/cache/target"
+        run: |
+          echo "🏗️ Building server binaries with pre-warmed dependencies..."
+
+          # Pre-warm sccache
+          sccache --start-server || true
+          echo "📊 Initial sccache stats:"
+          sccache --show-stats
+
+          # Build only the essential binaries for quick testing
+          echo "⏱️ Starting build..."
+          cargo build --release --bin rustdocs_mcp_server
+          cargo build --release --bin rustdocs_mcp_server_http
+
+          # Show final sccache stats
+          echo "📊 Final sccache stats:"
+          sccache --show-stats
+
+          # Copy binaries with correct directory structure
+          mkdir -p binaries/linux/amd64
+          cp /cache/target/release/rustdocs_mcp_server binaries/linux/amd64/
+          cp /cache/target/release/rustdocs_mcp_server_http binaries/linux/amd64/http_server
+
+          # Show binary info
+          echo "📦 Built binaries:"
+          ls -lh binaries/linux/amd64/
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push server image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_BASE }}:latest
+            ${{ env.REGISTRY }}/${{ env.IMAGE_BASE }}:${{ needs.version.outputs.short-sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            BUILDKIT_INLINE_CACHE=1
+
+  # Deploy immediately
+  deploy:
+    needs: [version, build-server]
+    runs-on: [self-hosted, Linux, X64, k8s-runner, rust-builder, org-runner]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup tools
+        run: |
+          mkdir -p $HOME/bin
+          if [ -f /shared/kubectl ]; then
+            cp /shared/kubectl $HOME/bin/
+            chmod +x $HOME/bin/kubectl
+          fi
+          if [ -f /shared/helm ]; then
+            cp /shared/helm $HOME/bin/
+            chmod +x $HOME/bin/helm
+          fi
+          echo "$HOME/bin" >> $GITHUB_PATH
+
+      - name: Quick Deploy Server
+        env:
+          # Default to localhost PostgreSQL if DATABASE_URL secret is not set
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          echo "🚀 Quick deploying version ${{ needs.version.outputs.version }}"
+
+          # Deploy with quick version tag
+          helm upgrade --install rustdocs-mcp ./charts/rust-docs-mcp-server \
+            --namespace mcp \
+            --create-namespace \
+            --set image.tag=latest \
+            --set env.OPENAI_API_KEY="${{ secrets.OPENAI_API_KEY }}" \
+            --set postgresql.enabled=true \
+            --timeout 5m \
+            --wait
+
+      - name: Verify deployment
+        run: |
+          echo "🔍 Quick deployment verification..."
+          kubectl get pods -n mcp -o wide
+          kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=rust-docs-mcp-server -n mcp --timeout=120s || true
+
+          echo ""
+          echo "✅ Quick deployment complete!"
+          echo "📦 Deployed: ${{ env.REGISTRY }}/${{ env.IMAGE_BASE }}:${{ needs.version.outputs.version }}"
+          echo "🔗 Commit: ${{ github.sha }}"
+          echo ""
+          echo "⚡ This was a QUICK DEPLOY - no tests were run!"
+          echo "🧪 Remember to run full CI before merging to main"
+
+      - name: Show service info
+        run: |
+          echo "📋 Service info:"
+          kubectl get svc -n mcp
+          echo ""
+          echo "📊 Pod status:"
+          kubectl get pods -n mcp -o wide

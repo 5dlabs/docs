@@ -1,0 +1,646 @@
+name: Unified CI/CD
+
+# This workflow includes auto-formatting capabilities:
+# - If Rust code formatting fails, it will automatically run `cargo fmt --all`
+# - The formatted code will be committed and pushed back to the branch
+# - The CI will then re-run to verify the formatting is correct
+# - This only happens on push events, not on pull requests
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_BASE: 5dlabs/rust-docs
+  RUST_STABLE_VERSION: stable
+
+jobs:
+  # Change detection job
+  changes:
+    runs-on: [self-hosted, Linux, X64, k8s-runner, rust-builder, org-runner]
+    outputs:
+      server: ${{ steps.filter.outputs.server }}
+      binaries: ${{ steps.filter.outputs.binaries }}
+      docker: ${{ steps.filter.outputs.docker }}
+      helm: ${{ steps.filter.outputs.helm }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v2
+        id: filter
+        with:
+          filters: |
+            server:
+              - 'src/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'sql/**'
+            binaries:
+              - 'src/bin/**'
+            docker:
+              - 'Dockerfile'
+              - 'Dockerfile.prebuilt'
+              - '.dockerignore'
+            helm:
+              - 'charts/**'
+
+  # Version determination
+  version:
+    runs-on: [self-hosted, Linux, X64, k8s-runner, rust-builder, org-runner]
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      is-release: ${{ steps.version.outputs.is-release }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine version
+        id: version
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            VERSION="${{ github.ref_name }}"
+            echo "version=${VERSION}" >> $GITHUB_OUTPUT
+            echo "is-release=true" >> $GITHUB_OUTPUT
+          else
+            # Use commit SHA for non-release builds
+            VERSION="main-$(git rev-parse --short HEAD)"
+            echo "version=${VERSION}" >> $GITHUB_OUTPUT
+            echo "is-release=false" >> $GITHUB_OUTPUT
+          fi
+
+  # Parallel linting and testing
+  lint-rust:
+    needs: changes
+    if: needs.changes.outputs.server == 'true' || needs.changes.outputs.binaries == 'true' || github.event_name == 'push'
+    runs-on: [self-hosted, Linux, X64, k8s-runner, rust-builder, org-runner]
+    outputs:
+      format-needed: ${{ steps.format-check.outputs.format-needed }}
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Rust environment
+        run: |
+          # Self-hosted runners should have Rust pre-installed
+          rustup default stable
+          rustup update stable
+          rustup component add rustfmt clippy
+          echo "Rust version: $(rustc --version)"
+
+      - name: Check formatting
+        id: format-check
+        run: |
+          if ! cargo fmt --all -- --check; then
+            echo "format-needed=true" >> $GITHUB_OUTPUT
+            echo "❌ Code formatting issues detected"
+            echo "FORMATTING_FAILED=true" >> $GITHUB_ENV
+          else
+            echo "format-needed=false" >> $GITHUB_OUTPUT
+            echo "✅ Code formatting is correct"
+            echo "FORMATTING_FAILED=false" >> $GITHUB_ENV
+          fi
+
+      - name: Fail job if formatting issues detected and not on push event
+        if: env.FORMATTING_FAILED == 'true' && github.event_name != 'push'
+        run: |
+          echo "❌ Formatting issues detected and auto-format is not available (not a push event)"
+          exit 1
+
+      - name: Run Clippy
+        if: env.FORMATTING_FAILED == 'false' || github.event_name == 'push'
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+  # Auto-format job that runs when formatting fails
+  auto-format:
+    needs: [changes, lint-rust]
+    if: always() && needs.lint-rust.outputs.format-needed == 'true' && github.event_name == 'push'
+    runs-on: [self-hosted, Linux, X64, k8s-runner, rust-builder, org-runner]
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Use a personal access token to trigger subsequent workflows
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Setup Rust environment
+        run: |
+          rustup default stable
+          rustup update stable
+          rustup component add rustfmt
+
+      - name: Auto-format Rust code
+        run: |
+          echo "🔧 Auto-formatting Rust code..."
+          cargo fmt --all
+
+      - name: Check for changes
+        id: changes
+        run: |
+          if git diff --quiet; then
+            echo "No changes after formatting"
+            echo "has-changes=false" >> $GITHUB_OUTPUT
+          else
+            echo "Changes detected after formatting"
+            echo "has-changes=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Commit and push changes
+        if: steps.changes.outputs.has-changes == 'true'
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add -A
+          git commit -m "🔧 Auto-format Rust code
+
+          This commit was automatically generated by the CI/CD pipeline
+          to fix formatting issues detected by cargo fmt.
+
+          Changes made:
+          - Applied cargo fmt --all to fix formatting
+
+          [skip ci]"
+          git push
+
+      - name: Comment on commit
+        if: steps.changes.outputs.has-changes == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const sha = context.sha;
+
+            await github.rest.repos.createCommitComment({
+              owner,
+              repo,
+              commit_sha: sha,
+              body: `🔧 **Auto-formatting applied**
+
+              The CI/CD pipeline detected formatting issues and automatically applied \`cargo fmt\` to fix them.
+
+              A new commit has been pushed with the formatting fixes. The CI will re-run automatically.
+
+              📝 **Next time**: Run \`cargo fmt --all\` locally before pushing to avoid this automatic formatting.`
+            });
+
+  # Re-run lint after auto-format (only if auto-format ran)
+  lint-rust-retry:
+    needs: [changes, auto-format]
+    if: always() && needs.auto-format.result == 'success'
+    runs-on: [self-hosted, Linux, X64, k8s-runner, rust-builder, org-runner]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Fetch the latest commit (including auto-format changes)
+          ref: ${{ github.ref }}
+
+      - name: Setup Rust environment
+        run: |
+          rustup default stable
+          rustup update stable
+          rustup component add rustfmt clippy
+
+      - name: Verify formatting is now correct
+        run: |
+          echo "🔍 Verifying formatting after auto-format..."
+          cargo fmt --all -- --check
+
+      - name: Run Clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+  test-rust:
+    needs: changes
+    if: needs.changes.outputs.server == 'true' || needs.changes.outputs.binaries == 'true' || github.event_name == 'push'
+    runs-on: [self-hosted, Linux, X64, k8s-runner, rust-builder, org-runner]
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: rust_docs_vectors
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Rust environment
+        run: |
+          rustup default stable
+          rustup update stable
+
+      - name: Setup database
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/rust_docs_vectors
+        run: |
+          # Self-hosted runners should have psql pre-installed
+          which psql || (echo "Installing postgresql-client..." && sudo apt-get update && sudo apt-get install -y postgresql-client)
+          psql "$DATABASE_URL" < sql/schema.sql
+          echo "✅ Database schema created"
+
+      - name: Run tests
+        env:
+          MCPDOCS_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/rust_docs_vectors
+        run: cargo test --all-features --all-targets
+
+  # Security scanning (non-blocking)
+  security-scan:
+    needs: changes
+    if: github.event_name == 'push'
+    runs-on: [self-hosted, Linux, X64, k8s-runner, rust-builder, org-runner]
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      # Cache Trivy DB
+      - name: Cache Trivy database
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/trivy
+          key: trivy-db-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            trivy-db-${{ runner.os }}-
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH'
+          cache-dir: ~/.cache/trivy
+
+      - name: Upload Trivy scan results
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-results
+          path: trivy-results.sarif
+
+      # Cache cargo-audit binary
+      - name: Cache cargo-audit
+        uses: actions/cache@v4
+        id: cargo-audit-cache
+        with:
+          path: ~/.cargo/bin/cargo-audit
+          key: cargo-audit-${{ runner.os }}-0.21.2
+
+      - name: Install cargo-audit
+        if: steps.cargo-audit-cache.outputs.cache-hit != 'true'
+        run: cargo install cargo-audit --version 0.21.2
+
+      - name: Rust security audit
+        run: cargo audit || true
+
+  # Build binaries
+  build-binaries:
+    needs: [version, lint-rust, test-rust, lint-rust-retry]
+    if: always() && !cancelled() && (needs.changes.outputs.server == 'true' || needs.changes.outputs.binaries == 'true' || github.event_name == 'push')
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          # Native compilation
+          - target: x86_64-unknown-linux-gnu
+            runner: [self-hosted, Linux, X64, k8s-runner, rust-builder, org-runner]
+            extension: ""
+          # Cross-compilation targets
+          - target: aarch64-unknown-linux-gnu
+            runner: [self-hosted, Linux, X64, k8s-runner, rust-builder, org-runner]
+            extension: ""
+          - target: x86_64-apple-darwin
+            runner: [self-hosted, Linux, X64, k8s-runner, rust-builder, org-runner]
+            extension: ""
+          - target: aarch64-apple-darwin
+            runner: [self-hosted, Linux, X64, k8s-runner, rust-builder, org-runner]
+            extension: ""
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup optimized Rust environment
+        run: |
+          echo "🚀 Setting up ULTRA-OPTIMIZED Rust build environment..."
+
+          # Add cargo bin to PATH
+          echo "/home/runner/.cargo/bin" >> $GITHUB_PATH
+          export PATH="/home/runner/.cargo/bin:$PATH"
+
+          # Set up Rust toolchain
+          rustup default stable
+          rustup update stable
+
+          # Verify pre-installed tools
+          echo "🔍 Verifying pre-installed tools..."
+          rustc --version
+          cargo --version
+          sccache --version || echo "⚠️ sccache not found"
+          mold --version || echo "⚠️ mold not found"
+
+          # Show available resources
+          echo "💾 Available resources:"
+          echo "CPU cores: $(nproc)"
+          echo "Memory: $(free -h | grep '^Mem:' | awk '{print $2}')"
+
+      - name: Setup cross-compilation tools
+        if: matrix.target != 'x86_64-unknown-linux-gnu'
+        run: |
+          echo "🔧 Setting up cross-compilation for ${{ matrix.target }}..."
+          rustup target add ${{ matrix.target }}
+          
+          # Install cross-compilation tools if needed
+          if [[ "${{ matrix.target }}" == *"apple-darwin"* ]]; then
+            echo "🍎 macOS cross-compilation support needed"
+            # TODO: Add osxcross setup if available on runners
+          elif [[ "${{ matrix.target }}" == "aarch64-unknown-linux-gnu" ]]; then
+            echo "🔧 ARM64 Linux cross-compilation"
+            # Should work with rustup target add
+          fi
+
+      - name: Setup sccache
+        run: |
+          echo "🗄️ Setting up sccache..."
+          export SCCACHE_CACHE_SIZE="50G"
+          export SCCACHE_IDLE_TIMEOUT="0"
+          
+          sccache --stop-server 2>/dev/null || true
+          sccache --start-server
+          
+          echo "📊 Initial sccache stats:"
+          sccache --show-stats
+
+      # Self-hosted runners use persistent cache directories
+
+      - name: Build binaries
+        env:
+          CARGO_INCREMENTAL: "0"
+          RUSTC_WRAPPER: sccache
+          CARGO_TARGET_DIR: /cache/target
+        run: |
+          echo "🏗️ Building for ${{ matrix.target }}..."
+
+          # Build all binaries
+          cargo build --release --target ${{ matrix.target }} \
+            --bin rustdocs_mcp_server \
+            --bin rustdocs_mcp_server_http \
+            --bin populate_db \
+            --bin populate_all \
+            --bin add_crate \
+            --bin backfill_versions
+
+          # Show sccache stats if available
+          if command -v sccache &> /dev/null; then
+            echo "📊 Final sccache stats:"
+            sccache --show-stats
+          fi
+
+      - name: Create binary archive
+        run: |
+          mkdir -p dist
+          cp target/${{ matrix.target }}/release/rustdocs_mcp_server* dist/
+          cp target/${{ matrix.target }}/release/populate_* dist/
+          cp target/${{ matrix.target }}/release/add_crate dist/
+          cp target/${{ matrix.target }}/release/backfill_versions dist/
+          
+          cd dist
+          tar czf rustdocs-mcp-${{ matrix.target }}.tar.gz *
+          echo "📦 Created archive: $(ls -lh *.tar.gz)"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: binaries-${{ matrix.target }}
+          path: dist/rustdocs-mcp-${{ matrix.target }}.tar.gz
+
+  # Build Docker images
+  build-docker:
+    needs: [version, build-binaries]
+    if: needs.changes.outputs.docker == 'true' || github.event_name == 'push'
+    runs-on: [self-hosted, Linux, X64, k8s-runner, rust-builder, org-runner]
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download binary artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: binaries-*
+          path: dist/
+
+      - name: Extract binaries
+        run: |
+          mkdir -p binaries
+          cd binaries
+          for arch in x86_64 aarch64; do
+            tar xzf ../dist/binaries-${arch}-unknown-linux-gnu/rustdocs-mcp-${arch}-unknown-linux-gnu.tar.gz
+            mkdir -p ${arch}
+            mv rustdocs_mcp_server* ${arch}/
+            mv populate_* ${arch}/
+            mv add_crate ${arch}/
+            mv backfill_versions ${arch}/
+          done
+          ls -la *
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push server image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.prebuilt
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_BASE }}:latest
+            ${{ env.REGISTRY }}/${{ env.IMAGE_BASE }}:${{ needs.version.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            BUILDKIT_INLINE_CACHE=1
+
+  # Test Helm chart
+  test-helm:
+    needs: changes
+    if: needs.changes.outputs.helm == 'true' || github.event_name == 'push'
+    runs-on: [self-hosted, Linux, X64, k8s-runner, rust-builder, org-runner]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: 'v3.14.0'
+
+      - name: Lint Helm chart
+        run: |
+          helm lint ./charts/rust-docs-mcp-server
+
+      - name: Test Helm chart rendering
+        run: |
+          # Test with default values
+          helm template rustdocs-mcp ./charts/rust-docs-mcp-server > /tmp/default.yaml
+          echo "✅ Default values template rendered successfully"
+
+          # Test with custom values
+          helm template rustdocs-mcp ./charts/rust-docs-mcp-server \
+            --set image.tag=test-version \
+            --set postgresql.enabled=true \
+            --set env.OPENAI_API_KEY=test-key > /tmp/custom.yaml
+          echo "✅ Custom values template rendered successfully"
+
+  # Deploy to environment (only on main branch)
+  deploy:
+    needs: [version, build-docker, test-helm]
+    if: (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) && github.event_name == 'push'
+    runs-on: [self-hosted, Linux, X64, k8s-runner, rust-builder, org-runner]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup tools
+        run: |
+          # Create local bin directory
+          mkdir -p $HOME/bin
+
+          # Copy tools from shared location if they exist
+          if [ -f /shared/kubectl ]; then
+            cp /shared/kubectl $HOME/bin/
+            chmod +x $HOME/bin/kubectl
+          fi
+
+          if [ -f /shared/helm ]; then
+            cp /shared/helm $HOME/bin/
+            chmod +x $HOME/bin/helm
+          fi
+
+          # Add to PATH for this job
+          echo "$HOME/bin" >> $GITHUB_PATH
+
+      - name: Deploy with Helm
+        env:
+          # Default to localhost PostgreSQL if DATABASE_URL secret is not set
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          echo "🚀 Deploying Rust Docs MCP Server version ${{ needs.version.outputs.version }}"
+
+          # Deploy the server
+          helm upgrade --install rustdocs-mcp ./charts/rust-docs-mcp-server \
+            --namespace mcp \
+            --create-namespace \
+            --set image.tag=${{ needs.version.outputs.version }} \
+            --set env.OPENAI_API_KEY="${{ secrets.OPENAI_API_KEY }}" \
+            --set postgresql.enabled=true \
+            --timeout 10m \
+            --wait \
+            --atomic
+
+          echo "✅ Deployment complete!"
+
+      - name: Verify deployment
+        run: |
+          echo "🔍 Verifying deployment..."
+          kubectl get pods -n mcp
+          kubectl get services -n mcp
+
+          # Wait for pods to be ready
+          kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=rust-docs-mcp-server -n mcp --timeout=300s
+
+          echo "✅ Deployment verification complete!"
+
+      - name: Deployment notification
+        run: |
+          echo "🎉 Successfully deployed Rust Docs MCP Server version ${{ needs.version.outputs.version }}"
+          echo ""
+          echo "Images deployed:"
+          echo "- ${{ env.REGISTRY }}/${{ env.IMAGE_BASE }}:${{ needs.version.outputs.version }}"
+          echo ""
+          echo "Cluster status:"
+          kubectl get pods -n mcp -o wide
+
+  # Create release (only for tags)
+  release:
+    needs: [version, deploy, build-binaries]
+    if: needs.version.outputs.is-release == 'true'
+    runs-on: [self-hosted, Linux, X64, k8s-runner, rust-builder, org-runner]
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all binary artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: binaries-*
+          path: dist/
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p release-assets
+          find dist -name "*.tar.gz" -exec cp {} release-assets/ \;
+          ls -la release-assets/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ needs.version.outputs.version }}
+          name: Release ${{ needs.version.outputs.version }}
+          body: |
+            ## 🚀 Rust Docs MCP Server Release ${{ needs.version.outputs.version }}
+
+            ### Container Image
+            ```
+            ${{ env.REGISTRY }}/${{ env.IMAGE_BASE }}:${{ needs.version.outputs.version }}
+            ```
+
+            ### Binary Downloads
+            Pre-built binaries are available for:
+            - Linux x86_64
+            - Linux ARM64
+            - macOS x86_64
+            - macOS ARM64
+
+            ### Installation
+
+            #### Using Docker:
+            ```bash
+            docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_BASE }}:${{ needs.version.outputs.version }}
+            ```
+
+            #### Using Helm:
+            ```bash
+            helm upgrade --install rustdocs-mcp ./charts/rust-docs-mcp-server \
+              --set image.tag=${{ needs.version.outputs.version }}
+            ```
+
+            #### Using pre-built binaries:
+            Download the appropriate binary for your platform from the assets below.
+
+            ### What's Changed
+            See the [commit history](https://github.com/${{ github.repository }}/commits/${{ needs.version.outputs.version }}) for changes in this release.
+          files: release-assets/*
+          draft: false
+          prerelease: false
