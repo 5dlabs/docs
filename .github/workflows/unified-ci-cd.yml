@@ -344,12 +344,8 @@ jobs:
     strategy:
       matrix:
         include:
-          # Native compilation on self-hosted
+          # Native compilation on self-hosted (x86_64 only for now)
           - target: x86_64-unknown-linux-gnu
-            runner: [self-hosted, rust-builder]
-            extension: ""
-          # Simplified cross-compilation - just ARM64 Linux on self-hosted
-          - target: aarch64-unknown-linux-gnu
             runner: [self-hosted, rust-builder]
             extension: ""
     permissions:
@@ -471,14 +467,13 @@ jobs:
         run: |
           mkdir -p binaries
           cd binaries
-          for arch in x86_64 aarch64; do
-            tar xzf ../dist/binaries-${arch}-unknown-linux-gnu/rustdocs-mcp-${arch}-unknown-linux-gnu.tar.gz
-            mkdir -p ${arch}
-            mv rustdocs_mcp_server* ${arch}/
-            mv populate_* ${arch}/
-            mv add_crate ${arch}/
-            mv backfill_versions ${arch}/
-          done
+          # Only extract x86_64 binaries for now
+          tar xzf ../dist/binaries-x86_64-unknown-linux-gnu/rustdocs-mcp-x86_64-unknown-linux-gnu.tar.gz
+          mkdir -p x86_64
+          mv rustdocs_mcp_server* x86_64/
+          mv populate_* x86_64/
+          mv add_crate x86_64/
+          mv backfill_versions x86_64/
           ls -la *
 
       - name: Set up QEMU
@@ -500,7 +495,7 @@ jobs:
         with:
           context: .
           file: ./Dockerfile.prebuilt
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           push: ${{ github.event_name != 'pull_request' }}
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_BASE }}:latest
@@ -736,9 +731,6 @@ jobs:
             ### Binary Downloads
             Pre-built binaries are available for:
             - Linux x86_64
-            - Linux ARM64
-            - macOS x86_64
-            - macOS ARM64
 
             ### Installation
 

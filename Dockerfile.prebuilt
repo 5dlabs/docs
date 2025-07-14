@@ -1,0 +1,51 @@
+# Multi-architecture image using pre-built binaries
+# This Dockerfile expects binaries to be extracted in ./binaries/
+FROM debian:bookworm-slim
+
+WORKDIR /app
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    libssl3 \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Determine architecture and copy appropriate binaries
+ARG TARGETARCH
+RUN echo "Target architecture: $TARGETARCH"
+
+# Copy pre-built binaries based on architecture
+COPY binaries/x86_64/rustdocs_mcp_server_http /usr/local/bin/http_server
+COPY binaries/x86_64/rustdocs_mcp_server /usr/local/bin/rustdocs_mcp_server
+COPY binaries/x86_64/populate_db /usr/local/bin/populate_db
+COPY binaries/x86_64/populate_all /usr/local/bin/populate_all
+COPY binaries/x86_64/add_crate /usr/local/bin/add_crate
+COPY binaries/x86_64/backfill_versions /usr/local/bin/backfill_versions
+
+# Make binaries executable
+RUN chmod +x /usr/local/bin/*
+
+# Copy entrypoint script
+COPY docker-entrypoint.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
+# Create non-root user
+RUN useradd -m -u 1000 rustdocs && chown -R rustdocs:rustdocs /app
+USER rustdocs
+
+# Expose port
+EXPOSE 3000
+
+# Set environment variables
+ENV RUST_LOG=rustdocs_mcp_server_http=info,rmcp=info
+ENV HOST=0.0.0.0
+ENV PORT=3000
+
+# Health check (commented out since no health endpoint yet)
+# HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+#   CMD curl -f http://localhost:3000/health || exit 1
+
+# Set entrypoint and default command
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+CMD ["http_server", "--all"]
