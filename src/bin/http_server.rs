@@ -373,6 +373,8 @@ impl McpHandler {
         args: AddCrateArgs,
     ) -> Result<CallToolResult, McpError> {
         use rustdocs_mcp_server::database::CrateConfig;
+        
+        info!("🔧 add_crate called for: {} ({})", args.crate_name, args.version_spec);
 
         // Validate inputs
         if args.crate_name.is_empty() {
@@ -422,14 +424,12 @@ impl McpHandler {
                     }
                 });
 
-                let response = serde_json::json!({
-                    "success": true,
-                    "message": format!("Crate {} ({}) configured successfully. Population started in background.", args.crate_name, args.version_spec),
-                    "config": saved_config,
-                    "status": "population_queued",
-                    "note": "Crate will be available for queries once population completes. Use check_crate_status to monitor progress."
-                });
-                Ok(CallToolResult::success(vec![Content::text(response.to_string())]))
+                let response = format!(
+                    "✅ Crate {} ({}) configured successfully!\n\n📋 Status: Population started in background\n🔍 Use check_crate_status tool to monitor progress\n⚡ Crate will be available for queries once population completes",
+                    args.crate_name, args.version_spec
+                );
+                info!("📤 add_crate returning response for: {}", args.crate_name);
+                Ok(CallToolResult::success(vec![Content::text(response)]))
             }
             Err(e) => Err(McpError::internal_error(format!("Failed to save crate configuration: {e}"), None))
         }
