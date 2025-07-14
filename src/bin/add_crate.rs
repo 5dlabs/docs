@@ -46,12 +46,9 @@ struct CrateConfig {
 }
 
 async fn scan_crate_docs_count(crate_name: &str, max_pages: usize) -> Result<usize, ServerError> {
-    println!(
-        "🔍 Scanning docs.rs to estimate document count for: {}",
-        crate_name
-    );
-
-    let base_url = format!("https://docs.rs/{}/latest/{}/", crate_name, crate_name);
+    println!("🔍 Scanning docs.rs to estimate document count for: {crate_name}");
+    
+    let base_url = format!("https://docs.rs/{crate_name}/latest/{crate_name}/");
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(30))
         .build()
@@ -78,10 +75,7 @@ async fn scan_crate_docs_count(crate_name: &str, max_pages: usize) -> Result<usi
 
     while let Some(url) = to_visit.pop_front() {
         if processed >= max_pages {
-            println!(
-                "⚠️  Reached scan limit of {} pages, found {} docs so far",
-                max_pages, doc_pages_found
-            );
+            println!("⚠️  Reached scan limit of {max_pages} pages, found {doc_pages_found} docs so far");
             break;
         }
 
@@ -93,16 +87,13 @@ async fn scan_crate_docs_count(crate_name: &str, max_pages: usize) -> Result<usi
         processed += 1;
 
         if processed % 50 == 0 {
-            println!(
-                "📊 Scanned {}/{} pages, found {} docs",
-                processed, max_pages, doc_pages_found
-            );
+            println!("📊 Scanned {processed}/{max_pages} pages, found {doc_pages_found} docs");
         }
 
         let html_content = match fetch_with_retry(&client, &url, 3).await {
             Ok(content) => content,
             Err(e) => {
-                eprintln!("Failed to fetch {} after retries: {}", url, e);
+                eprintln!("Failed to fetch {url} after retries: {e}");
                 continue;
             }
         };
@@ -161,12 +152,12 @@ async fn scan_crate_docs_count(crate_name: &str, max_pages: usize) -> Result<usi
                         } else {
                             // Remove filename and keep directory
                             let mut parts: Vec<&str> = url.split('/').collect();
-                            if parts.last().map_or(false, |p| p.contains('.')) {
+                            if parts.last().is_some_and(|p| p.contains('.')) {
                                 parts.pop(); // Remove filename
                             }
                             format!("{}/", parts.join("/"))
                         };
-                        format!("{}{}", current_base, href)
+                        format!("{current_base}{href}")
                     };
 
                     // Only follow links within the same crate's documentation, and skip fragments
@@ -186,10 +177,7 @@ async fn scan_crate_docs_count(crate_name: &str, max_pages: usize) -> Result<usi
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
 
-    println!(
-        "✅ Scan complete: found {} documentation pages in {} total pages",
-        doc_pages_found, processed
-    );
+    println!("✅ Scan complete: found {doc_pages_found} documentation pages in {processed} total pages");
     Ok(doc_pages_found)
 }
 
@@ -261,9 +249,9 @@ async fn main() -> Result<(), ServerError> {
     let config_path = "proxy-config.json";
     let mut config: ProxyConfig = if Path::new(config_path).exists() {
         let content = fs::read_to_string(config_path)
-            .map_err(|e| ServerError::Config(format!("Failed to read {}: {}", config_path, e)))?;
+            .map_err(|e| ServerError::Config(format!("Failed to read {config_path}: {e}")))?;
         serde_json::from_str(&content)
-            .map_err(|e| ServerError::Config(format!("Failed to parse {}: {}", config_path, e)))?
+            .map_err(|e| ServerError::Config(format!("Failed to parse {config_path}: {e}")))?
     } else {
         ProxyConfig {
             rustdocs_binary_path: "rustdocs_mcp_server".to_string(),
@@ -302,24 +290,18 @@ async fn main() -> Result<(), ServerError> {
         .map_err(|e| ServerError::Config(format!("Failed to serialize config: {e}")))?;
 
     fs::write(config_path, updated_content)
-        .map_err(|e| ServerError::Config(format!("Failed to write {}: {}", config_path, e)))?;
+        .map_err(|e| ServerError::Config(format!("Failed to write {config_path}: {e}")))?;
 
-    println!(
-        "✅ Successfully added/updated '{}' in proxy-config.json",
-        cli.crate_name
-    );
-    println!("📊 Expected documents: {}", expected_docs);
-
+    println!("✅ Successfully added/updated '{}' in proxy-config.json", cli.crate_name);
+    println!("📊 Expected documents: {expected_docs}");
+    
     // Optional: Show current database stats for this crate
     if let Ok(db) = Database::new().await {
         if let Ok(current_count) = db.count_crate_documents(&cli.crate_name).await {
             if current_count > 0 {
-                println!("📚 Current documents in database: {}", current_count);
+                println!("📚 Current documents in database: {current_count}");
                 if current_count < expected_docs {
-                    println!(
-                        "⚠️  Database has fewer docs than expected ({} < {})",
-                        current_count, expected_docs
-                    );
+                    println!("⚠️  Database has fewer docs than expected ({current_count} < {expected_docs})");
                     println!("💡 Run the server to trigger automatic backfill, or use 'cargo run --bin populate_db -- --crate-name {}'", cli.crate_name);
                 }
             } else {
