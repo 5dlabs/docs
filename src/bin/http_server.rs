@@ -863,17 +863,11 @@ impl McpHandler {
         };
 
         let message = if failed_count == 0 {
-            format!(
-                "Successfully configured {} crates, ingestion started",
-                successful_count
-            )
+            format!("Successfully configured {successful_count} crates, ingestion started")
         } else if successful_count == 0 {
-            format!("Failed to configure any crates ({} errors)", failed_count)
+            format!("Failed to configure any crates ({failed_count} errors)")
         } else {
-            format!(
-                "Configured {} crates successfully, {} failed",
-                successful_count, failed_count
-            )
+            format!("Configured {successful_count} crates successfully, {failed_count} failed")
         };
 
         let response = AddCratesResponse {
