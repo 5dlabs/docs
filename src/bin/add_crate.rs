@@ -203,12 +203,25 @@ async fn fetch_with_retry(
                     let wait_time = Duration::from_secs(2_u64.pow(attempt as u32));
                     tokio::time::sleep(wait_time).await;
                     continue;
-                } else {
+                } else if response.status().is_client_error() {
+                    // 4xx errors (including 404) are permanent failures - don't retry
                     return Err(ServerError::Network(format!(
                         "HTTP {}: {}",
                         response.status(),
                         url
                     )));
+                } else {
+                    // 5xx server errors should be retried
+                    if attempt == retries - 1 {
+                        return Err(ServerError::Network(format!(
+                            "HTTP {}: {}",
+                            response.status(),
+                            url
+                        )));
+                    }
+                    let wait_time = Duration::from_secs(2_u64.pow(attempt as u32));
+                    tokio::time::sleep(wait_time).await;
+                    continue;
                 }
             }
             Err(e) => {

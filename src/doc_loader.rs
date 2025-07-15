@@ -264,7 +264,22 @@ async fn fetch_with_retry(
                             attempts + 1
                         )));
                     }
+                } else if response.status() == 404 {
+                    // 404 is a permanent failure - don't retry
+                    eprintln!("⚠️  Page not found (404): {url} - skipping");
+                    return Err(DocLoaderError::Network(format!(
+                        "HTTP {}",
+                        response.status()
+                    )));
+                } else if response.status().is_client_error() {
+                    // Other 4xx errors are also permanent failures - don't retry
+                    eprintln!("⚠️  Client error ({}): {url} - skipping", response.status());
+                    return Err(DocLoaderError::Network(format!(
+                        "HTTP {}",
+                        response.status()
+                    )));
                 } else {
+                    // 5xx server errors should be retried
                     eprintln!("HTTP error for {}: {}", url, response.status());
                     if attempts >= max_retries {
                         return Err(DocLoaderError::Network(format!(
