@@ -62,6 +62,25 @@ pub async fn load_documents_from_docs_rs(
     let max_pages = max_pages.unwrap_or(10000); // Default to 10000 pages if not specified
     let mut processed = 0;
 
+    // Helper function to check if a URL should be processed (filter out source code and other non-docs)
+    fn should_process_url(url: &str) -> bool {
+        // Skip source code pages
+        if url.contains("/src/") {
+            return false;
+        }
+        
+        // Skip specific non-documentation patterns
+        if url.contains("#method.") || 
+           url.contains("#impl-") ||
+           url.contains("#associatedtype.") ||
+           url.contains("#associatedconstant.") {
+            return false;
+        }
+        
+        // Only process actual documentation pages
+        true
+    }
+
     while let Some(url) = to_visit.pop_front() {
         if processed >= max_pages {
             eprintln!("Reached maximum page limit ({max_pages}), stopping");
@@ -69,6 +88,12 @@ pub async fn load_documents_from_docs_rs(
         }
 
         if visited.contains(&url) {
+            continue;
+        }
+
+        // Skip non-documentation URLs
+        if !should_process_url(&url) {
+            visited.insert(url.clone());
             continue;
         }
 
@@ -174,6 +199,7 @@ pub async fn load_documents_from_docs_rs(
                                 if new_url_str.contains("docs.rs")
                                     && new_url_str.contains(crate_name)
                                     && !visited.contains(&new_url_str)
+                                    && should_process_url(&new_url_str)
                                 {
                                     to_visit.push_back(new_url_str.clone());
                                     added_links += 1;
