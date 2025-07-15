@@ -68,15 +68,16 @@ pub async fn load_documents_from_docs_rs(
         if url.contains("/src/") {
             return false;
         }
-        
+
         // Skip specific non-documentation patterns
-        if url.contains("#method.") || 
-           url.contains("#impl-") ||
-           url.contains("#associatedtype.") ||
-           url.contains("#associatedconstant.") {
+        if url.contains("#method.")
+            || url.contains("#impl-")
+            || url.contains("#associatedtype.")
+            || url.contains("#associatedconstant.")
+        {
             return false;
         }
-        
+
         // Only process actual documentation pages
         true
     }
