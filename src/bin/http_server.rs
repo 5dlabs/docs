@@ -278,6 +278,72 @@ struct RemoveCrateArgs {
     version_spec: Option<String>,
 }
 
+#[derive(Deserialize, Serialize, JsonSchema)]
+struct CrateSpec {
+    /// The crate name (e.g., 'tokio', 'serde')
+    crate_name: String,
+    /// Version specification: 'latest' or specific version (e.g., '1.35.0')
+    #[serde(default = "default_version_spec")]
+    version_spec: String,
+    /// Optional features to enable (e.g., ['full', 'macros'])
+    #[serde(skip_serializing_if = "Option::is_none")]
+    features: Option<Vec<String>>,
+    /// Whether the crate is enabled (default: true)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    enabled: Option<bool>,
+    /// Expected number of documents (will be auto-detected if not provided)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    expected_docs: Option<i32>,
+}
+
+fn default_version_spec() -> String {
+    "latest".to_string()
+}
+
+#[derive(Deserialize, Serialize, JsonSchema)]
+struct AddCratesArgs {
+    /// List of crates to add/configure
+    crates: Vec<CrateSpec>,
+    /// Whether to fail fast on first error (default: false - best effort)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fail_fast: Option<bool>,
+}
+
+#[derive(Deserialize, Serialize, JsonSchema)]
+struct CrateResult {
+    /// The crate name
+    crate_name: String,
+    /// Whether the crate was successfully configured
+    success: bool,
+    /// Error message if configuration failed
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+    /// Status message
+    message: String,
+}
+
+#[derive(Deserialize, Serialize, JsonSchema)]
+struct AddCratesResponse {
+    /// Results for each crate
+    results: Vec<CrateResult>,
+    /// Summary statistics
+    summary: AddCratesSummary,
+    /// Overall message
+    message: String,
+}
+
+#[derive(Deserialize, Serialize, JsonSchema)]
+struct AddCratesSummary {
+    /// Total number of crates processed
+    total: usize,
+    /// Number of successful configurations
+    successful: usize,
+    /// Number of failed configurations
+    failed: usize,
+    /// Number of background ingestion tasks started
+    ingestion_started: usize,
+}
+
 // Implement ServerHandler trait with correct signatures
 #[tool(tool_box)]
 impl ServerHandler for McpHandler {
@@ -676,6 +742,167 @@ impl McpHandler {
                 None,
             )),
         }
+    }
+
+    #[tool(description = "Add or update multiple crate configurations")]
+    async fn add_crates(
+        &self,
+        #[tool(aggr)] args: AddCratesArgs,
+    ) -> Result<CallToolResult, McpError> {
+        use rustdocs_mcp_server::database::CrateConfig;
+
+        info!("🔧 add_crates called for {} crates", args.crates.len());
+
+        if args.crates.is_empty() {
+            return Err(McpError::invalid_params("No crates provided", None));
+        }
+
+        let fail_fast = args.fail_fast.unwrap_or(false);
+        let mut results = Vec::new();
+        let mut successful_count = 0;
+        let mut failed_count = 0;
+        let mut ingestion_started_count = 0;
+
+        // Process each crate
+        for crate_spec in args.crates {
+            info!("Processing crate: {}", crate_spec.crate_name);
+
+            // Validate inputs
+            let validation_result = self.validate_crate_spec(&crate_spec).await;
+
+            match validation_result {
+                Ok(_) => {
+                    // Create config
+                    let config = CrateConfig {
+                        id: 0, // Will be set by database
+                        name: crate_spec.crate_name.clone(),
+                        version_spec: crate_spec.version_spec.clone(),
+                        current_version: None, // Will be set during population
+                        features: crate_spec.features.unwrap_or_default(),
+                        expected_docs: crate_spec.expected_docs.unwrap_or(1000),
+                        enabled: crate_spec.enabled.unwrap_or(true),
+                        last_checked: None,
+                        last_populated: None,
+                        created_at: chrono::Utc::now(),
+                        updated_at: chrono::Utc::now(),
+                    };
+
+                    // Save to database
+                    match self.database.upsert_crate_config(&config).await {
+                        Ok(saved_config) => {
+                            // Create a population job
+                            let _ = self.database.create_population_job(saved_config.id).await;
+
+                            successful_count += 1;
+                            ingestion_started_count += 1;
+
+                            let result = CrateResult {
+                                crate_name: crate_spec.crate_name.clone(),
+                                success: true,
+                                error: None,
+                                message: "Configuration saved, ingestion queued".to_string(),
+                            };
+                            results.push(result);
+
+                            // Spawn background population task
+                            let crate_name = crate_spec.crate_name.clone();
+                            let features = saved_config.features.clone();
+                            let handler_clone = self.clone();
+                            tokio::spawn(async move {
+                                match handler_clone.populate_crate(&crate_name, &features).await {
+                                    Ok(_) => {
+                                        eprintln!("✅ Background population completed for crate: {crate_name}");
+                                    }
+                                    Err(e) => {
+                                        eprintln!(
+                                            "⚠️  Background population failed for crate {crate_name}: {e}"
+                                        );
+                                    }
+                                }
+                            });
+                        }
+                        Err(e) => {
+                            failed_count += 1;
+                            let result = CrateResult {
+                                crate_name: crate_spec.crate_name.clone(),
+                                success: false,
+                                error: Some(e.to_string()),
+                                message: "Failed to save configuration".to_string(),
+                            };
+                            results.push(result);
+
+                            if fail_fast {
+                                break;
+                            }
+                        }
+                    }
+                }
+                Err(validation_error) => {
+                    failed_count += 1;
+                    let result = CrateResult {
+                        crate_name: crate_spec.crate_name.clone(),
+                        success: false,
+                        error: Some(validation_error),
+                        message: "Validation failed".to_string(),
+                    };
+                    results.push(result);
+
+                    if fail_fast {
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Create response
+        let summary = AddCratesSummary {
+            total: results.len(),
+            successful: successful_count,
+            failed: failed_count,
+            ingestion_started: ingestion_started_count,
+        };
+
+        let message = if failed_count == 0 {
+            format!(
+                "Successfully configured {} crates, ingestion started",
+                successful_count
+            )
+        } else if successful_count == 0 {
+            format!("Failed to configure any crates ({} errors)", failed_count)
+        } else {
+            format!(
+                "Configured {} crates successfully, {} failed",
+                successful_count, failed_count
+            )
+        };
+
+        let response = AddCratesResponse {
+            results,
+            summary,
+            message,
+        };
+
+        Ok(CallToolResult::success(vec![Content::text(
+            serde_json::to_string_pretty(&response).map_err(|e| {
+                McpError::internal_error(format!("Failed to serialize response: {e}"), None)
+            })?,
+        )]))
+    }
+
+    // Helper method to validate crate specifications
+    async fn validate_crate_spec(&self, crate_spec: &CrateSpec) -> Result<(), String> {
+        if crate_spec.crate_name.is_empty() {
+            return Err("Crate name cannot be empty".to_string());
+        }
+
+        if crate_spec.version_spec != "latest"
+            && !crate_spec.version_spec.chars().any(|c| c.is_numeric())
+        {
+            return Err("Version spec must be 'latest' or a valid version number".to_string());
+        }
+
+        // Additional validation can be added here
+        Ok(())
     }
 }
 
