@@ -176,13 +176,13 @@ postgresql:
   enabled: true
   global:
     storageClass: "local-path"
+    imagePullSecrets:
+      - name: ghcr-secret
   image:
     registry: "ghcr.io"
     repository: "5dlabs/rust-docs-postgresql"
     tag: "pg16-latest"
     pullPolicy: "Always"
-  imagePullSecrets:
-    - name: ghcr-secret
   auth:
     postgresPassword: "rustdocs123"
     username: "rustdocs"
