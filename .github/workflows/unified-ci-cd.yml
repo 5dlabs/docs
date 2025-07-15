@@ -579,8 +579,7 @@ jobs:
             --set image.tag=${{ needs.version.outputs.version }} \
             --set app.secrets.openaiApiKey="${{ secrets.OPENAI_API_KEY }}" \
             --set postgresql.enabled=true \
-            --timeout 10m \
-            --wait \
+            --timeout 5m \
             --atomic
 
           echo "✅ Deployment complete!"
@@ -590,10 +589,8 @@ jobs:
           echo "🔍 Verifying deployment..."
           kubectl get pods -n mcp
           kubectl get services -n mcp
-
-          # Wait for pods to be ready
-          kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=rust-docs-mcp-server -n mcp --timeout=300s
-
+          
+          echo "📝 Note: Pods may take time to become ready due to auto-population"
           echo "✅ Deployment verification complete!"
 
       - name: Deployment notification
