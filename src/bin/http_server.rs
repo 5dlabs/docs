@@ -431,17 +431,20 @@ impl McpHandler {
         &self,
         #[tool(aggr)] args: QueryRustDocsArgs,
     ) -> Result<CallToolResult, McpError> {
-        // Check if crate has embeddings in database (this also validates availability)
-        if !self
-            .database
-            .has_embeddings(&args.crate_name)
-            .await
-            .map_err(|e| McpError::internal_error(e.to_string(), None))?
-        {
+        // Check if crate is available (hybrid approach: static list + database fallback)
+        let is_available = self.available_crates.contains(&args.crate_name)
+            || self
+                .database
+                .has_embeddings(&args.crate_name)
+                .await
+                .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+
+        if !is_available {
             return Err(McpError::invalid_params(
                 format!(
-                    "No embeddings found for crate '{}'. Please populate the database first using the 'add_crate' tool.",
-                    args.crate_name
+                    "Crate '{}' not available. Available crates: {}",
+                    args.crate_name,
+                    self.available_crates.join(", ")
                 ),
                 None,
             ));
