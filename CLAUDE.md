@@ -1,16 +1,22 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Claude Code (claude.ai/code) when working with
+code in this repository.
 
 ## Project Overview
 
-This is a Rust-based MCP (Model Context Protocol) server that provides AI assistants with up-to-date Rust crate documentation. It uses PostgreSQL with pgvector for semantic search capabilities and supports multiple embedding providers (OpenAI and Voyage AI).
+This is a Rust-based MCP (Model Context Protocol) server that provides AI
+assistants with up-to-date Rust crate documentation. It uses PostgreSQL with
+pgvector for semantic search capabilities and supports multiple embedding
+providers (OpenAI and Voyage AI).
 
-**Repository**: https://github.com/5dlabs/rust-docs (renamed from rust-docs-mcp-server)
+**Repository**: <https://github.com/5dlabs/rust-docs> (renamed from
+rust-docs-mcp-server)
 
 ## Essential Commands
 
 ### Linting and Code Quality
+
 ```bash
 # Run Clippy with all targets and features
 cargo clippy --all-targets --all-features -- -D warnings
@@ -23,6 +29,7 @@ cargo fmt --all
 ```
 
 ### Building and Testing
+
 ```bash
 # Build the project
 cargo build --release
@@ -35,6 +42,7 @@ cargo check --all-targets --all-features
 ```
 
 ### Running Binaries
+
 ```bash
 # HTTP MCP server (main server for production)
 cargo run --bin rustdocs_mcp_server_http -- --all
@@ -52,6 +60,7 @@ cargo run --bin migrate_config
 ```
 
 ### Database Operations
+
 ```bash
 # Create database with pgvector
 createdb rust_docs_vectors
@@ -65,6 +74,7 @@ export OPENAI_API_KEY="sk-..." # Or VOYAGE_API_KEY for Voyage embeddings
 ```
 
 ### Kubernetes/Helm Deployment
+
 ```bash
 # Deploy to mcp namespace
 helm upgrade --install rustdocs-mcp ./charts/rust-docs-mcp-server \
@@ -109,6 +119,7 @@ kubectl port-forward -n mcp service/rustdocs-mcp-rust-docs-mcp-server 3000:3000
 ### Binary Names and Docker Context
 
 **CRITICAL**: The binary names differ between Cargo.toml and Docker:
+
 - Cargo.toml: `rustdocs_mcp_server_http`
 - Docker image: Copied as `http_server`
 - Helm deployment: Uses `command: ["http_server"]`
@@ -130,24 +141,29 @@ kubectl port-forward -n mcp service/rustdocs-mcp-rust-docs-mcp-server 3000:3000
 ## Critical Context and Common Issues
 
 ### HTTP Server Startup
+
 - The server can now start with zero crates configured
 - It will log warnings but continue running
 - Use MCP tools to add crates after startup
 
 ### Image Pull Issues
+
 - Set `pullPolicy: Always` in values.yaml for `latest` tag
 - Kubernetes may cache images with `IfNotPresent`
 
 ### Health Endpoint
+
 - Readiness probe expects `/health` endpoint (not implemented)
 - This causes deployment timeouts
 
 ### PostgreSQL Storage Class
+
 - Configure under `postgresql.primary.persistence.storageClass`
 - Also set `postgresql.global.storageClass` for global config
 - Use `local-path` for local development clusters
 
 ### RBAC Configuration
+
 - GitHub runner service account in `arc-systems` namespace
 - Needs permissions in `mcp` namespace
 - Apply `mcp-namespace-rbac.yaml` for proper permissions

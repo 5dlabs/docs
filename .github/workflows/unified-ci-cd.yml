@@ -1,3 +1,4 @@
+---
 name: Unified CI/CD
 
 # This workflow includes auto-formatting capabilities:
@@ -8,11 +9,11 @@ name: Unified CI/CD
 
 on:
   push:
-    branches: [ main, 'fix/**', 'feature/**' ]
-    tags: [ 'v*' ]
+    branches: [main, 'fix/**', 'feature/**']
+    tags: ['v*']
   pull_request:
-    branches: [ main ]
-  workflow_dispatch:
+    branches: [main]
+  workflow_dispatch: {}
 
 env:
   REGISTRY: ghcr.io
@@ -29,11 +30,12 @@ jobs:
   changes:
     runs-on: ubuntu-latest
     outputs:
-      server: ${{ steps.filter.outputs.server }}
-      binaries: ${{ steps.filter.outputs.binaries }}
-      docker: ${{ steps.filter.outputs.docker }}
-      helm: ${{ steps.filter.outputs.helm }}
+      server: ${{ steps.filter.outputs['server'] }}
+      binaries: ${{ steps.filter.outputs['binaries'] }}
+      docker: ${{ steps.filter.outputs['docker'] }}
+      helm: ${{ steps.filter.outputs['helm'] }}
     steps:
+
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v2
         id: filter
@@ -81,21 +83,24 @@ jobs:
   # Parallel linting and testing
   lint-rust:
     needs: changes
-    if: needs.changes.outputs.server == 'true' || needs.changes.outputs.binaries == 'true' || github.event_name == 'push'
+    if: >-
+      always() && (needs.changes.outputs.server == 'true' ||
+      needs.changes.outputs.binaries == 'true' ||
+      github.event_name == 'push')
     runs-on: [self-hosted, rust-builder]
     outputs:
-      format-needed: ${{ steps.format-check.outputs.format-needed }}
+      format-needed: ${{ steps.format-check.outputs['format-needed'] }}
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Setup Rust environment
         run: |
           echo "🚀 Setting up Rust build environment..."
-          
+
           # Add cargo bin to PATH for this step and all subsequent steps
           echo "/home/runner/.cargo/bin" >> $GITHUB_PATH
           export PATH="/home/runner/.cargo/bin:$PATH"
-          
+
           # Set up Rust toolchain (required for rust-builder image)
           rustup default stable
           rustup update stable
@@ -116,19 +121,19 @@ jobs:
           fi
 
       - name: Fail job if formatting issues detected and not on push event
-        if: env.FORMATTING_FAILED == 'true' && github.event_name != 'push'
+        if: steps.format-check.outputs['format-needed'] == 'true' && github.event_name != 'push'
         run: |
           echo "❌ Formatting issues detected and auto-format is not available (not a push event)"
           exit 1
 
       - name: Run Clippy
-        if: env.FORMATTING_FAILED == 'false' || github.event_name == 'push'
+        if: steps.format-check.outputs['format-needed'] == 'false' || github.event_name == 'push'
         run: cargo clippy --all-targets --all-features -- -D warnings
 
   # Auto-format job that runs when formatting fails
   auto-format:
     needs: [changes, lint-rust]
-    if: always() && needs.lint-rust.outputs.format-needed == 'true' && github.event_name == 'push'
+    if: always() && needs.lint-rust.outputs['format-needed'] == 'true' && github.event_name == 'push'
     runs-on: [self-hosted, rust-builder]
     permissions:
       contents: write
@@ -142,11 +147,11 @@ jobs:
       - name: Setup Rust environment
         run: |
           echo "🚀 Setting up Rust build environment..."
-          
+
           # Add cargo bin to PATH for this step and all subsequent steps
           echo "/home/runner/.cargo/bin" >> $GITHUB_PATH
           export PATH="/home/runner/.cargo/bin:$PATH"
-          
+
           # Set up Rust toolchain
           rustup default stable
           rustup update stable
@@ -170,7 +175,7 @@ jobs:
           fi
 
       - name: Commit and push changes
-        if: steps.changes.outputs.has-changes == 'true'
+        if: steps.changes.outputs['has-changes'] == 'true'
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
@@ -187,7 +192,7 @@ jobs:
           git push
 
       - name: Comment on commit
-        if: steps.changes.outputs.has-changes == 'true'
+        if: steps.changes.outputs['has-changes'] == 'true'
         uses: actions/github-script@v7
         with:
           script: |
@@ -221,11 +226,11 @@ jobs:
       - name: Setup Rust environment
         run: |
           echo "🚀 Setting up Rust build environment..."
-          
+
           # Add cargo bin to PATH for this step and all subsequent steps
           echo "/home/runner/.cargo/bin" >> $GITHUB_PATH
           export PATH="/home/runner/.cargo/bin:$PATH"
-          
+
           # Set up Rust toolchain
           rustup default stable
           rustup update stable
@@ -242,7 +247,7 @@ jobs:
 
   test-rust:
     needs: changes
-    if: needs.changes.outputs.server == 'true' || needs.changes.outputs.binaries == 'true' || github.event_name == 'push'
+    if: always() && (needs.changes.outputs.server == 'true' || needs.changes.outputs.binaries == 'true' || github.event_name == 'push')
     runs-on: [self-hosted, rust-builder]
     services:
       postgres:
@@ -260,15 +265,15 @@ jobs:
           - 5432:5432
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Setup Rust environment
         run: |
           echo "🚀 Setting up Rust build environment..."
-          
+
           # Add cargo bin to PATH for this step and all subsequent steps
           echo "/home/runner/.cargo/bin" >> $GITHUB_PATH
           export PATH="/home/runner/.cargo/bin:$PATH"
-          
+
           # Set up Rust toolchain
           rustup default stable
           rustup update stable
@@ -363,22 +368,22 @@ jobs:
           echo "🚀 Setting up Rust build environment..."
           echo "Runner: ${{ matrix.runner }}"
           echo "Target: ${{ matrix.target }}"
-          
+
           # Add cargo bin to PATH for self-hosted runners
           echo "/home/runner/.cargo/bin" >> $GITHUB_PATH
           export PATH="/home/runner/.cargo/bin:$PATH"
-          
+
           # Set up Rust toolchain
           rustup default stable
           rustup update stable
-          
+
           # Verify pre-installed tools
           echo "🔍 Verifying pre-installed tools..."
           rustc --version
           cargo --version
           sccache --version || echo "⚠️ sccache not found"
           mold --version || echo "⚠️ mold not found"
-          
+
           # Show available resources
           echo "💾 Available resources:"
           echo "CPU cores: $(nproc)"
@@ -388,10 +393,10 @@ jobs:
         if: matrix.target != 'x86_64-unknown-linux-gnu'
         run: |
           echo "🔧 Setting up cross-compilation for ${{ matrix.target }}..."
-          
+
           # Remove existing target first to avoid conflicts
           rustup target remove ${{ matrix.target }} || true
-          
+
           # Add target
           rustup target add ${{ matrix.target }}
 
@@ -400,10 +405,10 @@ jobs:
           echo "🗄️ Setting up sccache..."
           export SCCACHE_CACHE_SIZE="50G"
           export SCCACHE_IDLE_TIMEOUT="0"
-          
+
           sccache --stop-server 2>/dev/null || true
           sccache --start-server
-          
+
           echo "📊 Initial sccache stats:"
           sccache --show-stats
 
@@ -427,20 +432,20 @@ jobs:
             --bin backfill_versions
 
           # Show sccache stats
-          echo "📊 Final sccache stats:"
-          sccache --show-stats
+            echo "📊 Final sccache stats:"
+            sccache --show-stats
 
       - name: Create binary archive
         run: |
           # Use the same target directory as specified in CARGO_TARGET_DIR
           TARGET_DIR="/cache/target"
-          
+
           mkdir -p dist
           cp ${TARGET_DIR}/${{ matrix.target }}/release/rustdocs_mcp_server* dist/
           cp ${TARGET_DIR}/${{ matrix.target }}/release/populate_* dist/
           cp ${TARGET_DIR}/${{ matrix.target }}/release/add_crate dist/
           cp ${TARGET_DIR}/${{ matrix.target }}/release/backfill_versions dist/
-          
+
           cd dist
           tar czf rustdocs-mcp-${{ matrix.target }}.tar.gz *
           echo "📦 Created archive: $(ls -lh *.tar.gz)"
@@ -454,7 +459,7 @@ jobs:
   # Build Docker images
   build-docker:
     needs: [version, build-binaries, changes]
-    if: needs.changes.outputs.docker == 'true' || github.event_name == 'push'
+    if: always() && !cancelled() && (needs.changes.outputs.docker == 'true' || github.event_name == 'push')
     runs-on: [self-hosted, rust-builder]
     permissions:
       contents: read
@@ -511,7 +516,7 @@ jobs:
   # Test Helm chart
   test-helm:
     needs: changes
-    if: needs.changes.outputs.helm == 'true' || github.event_name == 'push'
+    if: always() && (needs.changes.outputs.helm == 'true' || github.event_name == 'push')
     runs-on: [self-hosted, rust-builder]
     steps:
       - uses: actions/checkout@v4
@@ -568,7 +573,7 @@ jobs:
       - name: Deploy with Helm
         env:
           # Default to localhost PostgreSQL if DATABASE_URL secret is not set
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL || '' }}
         run: |
           echo "🚀 Deploying Rust Docs MCP Server version ${{ needs.version.outputs.version }}"
 
@@ -589,7 +594,7 @@ jobs:
           echo "🔍 Verifying deployment..."
           kubectl get pods -n mcp
           kubectl get services -n mcp
-          
+
           echo "📝 Note: Pods may take time to become ready due to auto-population"
           echo "✅ Deployment verification complete!"
 
@@ -626,29 +631,29 @@ jobs:
           # Get the latest tag
           LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
           echo "Latest tag: $LATEST_TAG"
-          
+
           # Parse version numbers
           VERSION=${LATEST_TAG#v}
           IFS='.' read -r -a VERSION_PARTS <<< "$VERSION"
           MAJOR=${VERSION_PARTS[0]:-0}
           MINOR=${VERSION_PARTS[1]:-0}
           PATCH=${VERSION_PARTS[2]:-0}
-          
+
           echo "Current version: $MAJOR.$MINOR.$PATCH"
-          
+
           # Check commit messages since last tag to determine version bump
           COMMITS_SINCE_TAG=$(git rev-list ${LATEST_TAG}..HEAD --count 2>/dev/null || git rev-list HEAD --count)
           echo "Commits since last tag: $COMMITS_SINCE_TAG"
-          
+
           if [ "$COMMITS_SINCE_TAG" -eq 0 ]; then
             echo "No new commits, skipping release"
             echo "should-release=false" >> $GITHUB_OUTPUT
             exit 0
           fi
-          
+
           # Get commit messages since last tag
           COMMIT_MESSAGES=$(git log ${LATEST_TAG}..HEAD --pretty=format:"%s" 2>/dev/null || git log HEAD --pretty=format:"%s")
-          
+
           # Determine version bump based on commit messages
           if echo "$COMMIT_MESSAGES" | grep -qE "BREAKING CHANGE|!:|^[a-z]+!:"; then
             # Major version bump for breaking changes
@@ -666,7 +671,7 @@ jobs:
             PATCH=$((PATCH + 1))
             echo "🔧 Patch version bump detected (bug fixes/improvements)"
           fi
-          
+
           NEW_TAG="v$MAJOR.$MINOR.$PATCH"
           echo "New version: $NEW_TAG"
           echo "new-tag=$NEW_TAG" >> $GITHUB_OUTPUT
@@ -677,27 +682,27 @@ jobs:
         run: |
           NEW_TAG="${{ steps.version.outputs.new-tag }}"
           echo "🏷️ Creating tag: $NEW_TAG"
-          
+
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          
+
           # Create annotated tag with commit summary
           COMMIT_SUMMARY=$(git log -1 --pretty=format:"%s")
           git tag -a "$NEW_TAG" -m "Release $NEW_TAG
 
           Automatic release created by CI/CD pipeline.
-          
+
           Latest commit: $COMMIT_SUMMARY
-          
+
           🤖 Generated with GitHub Actions"
-          
+
           git push origin "$NEW_TAG"
           echo "✅ Tag $NEW_TAG created and pushed"
 
-  # Create release (triggered by tags)
+  # Create release (triggered by auto-version creating tags)
   release:
-    needs: [version, build-binaries]
-    if: needs.version.outputs.is-release == 'true'
+    needs: [auto-version, build-binaries]
+    if: needs.auto-version.outputs.should-release == 'true'
     runs-on: [self-hosted, rust-builder]
     permissions:
       contents: write
@@ -719,14 +724,14 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: ${{ needs.version.outputs.version }}
-          name: Release ${{ needs.version.outputs.version }}
+          tag_name: ${{ needs.auto-version.outputs.new-tag }}
+          name: Release ${{ needs.auto-version.outputs.new-tag }}
           body: |
-            ## 🚀 Rust Docs MCP Server Release ${{ needs.version.outputs.version }}
+            ## 🚀 Rust Docs MCP Server Release ${{ needs.auto-version.outputs.new-tag }}
 
             ### Container Image
             ```
-            ${{ env.REGISTRY }}/${{ env.IMAGE_BASE }}:${{ needs.version.outputs.version }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_BASE }}:${{ needs.auto-version.outputs.new-tag }}
             ```
 
             ### Binary Downloads
@@ -737,20 +742,20 @@ jobs:
 
             #### Using Docker:
             ```bash
-            docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_BASE }}:${{ needs.version.outputs.version }}
+            docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_BASE }}:${{ needs.auto-version.outputs.new-tag }}
             ```
 
             #### Using Helm:
             ```bash
             helm upgrade --install rustdocs-mcp ./charts/rust-docs-mcp-server \
-              --set image.tag=${{ needs.version.outputs.version }}
+              --set image.tag=${{ needs.auto-version.outputs.new-tag }}
             ```
 
             #### Using pre-built binaries:
             Download the appropriate binary for your platform from the assets below.
 
             ### What's Changed
-            See the [commit history](https://github.com/${{ github.repository }}/commits/${{ needs.version.outputs.version }}) for changes in this release.
+            See the [commit history](https://github.com/${{ github.repository }}/commits/${{ needs.auto-version.outputs.new-tag }}) for changes in this release.
           files: release-assets/*
           draft: false
           prerelease: false
