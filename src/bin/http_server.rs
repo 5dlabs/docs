@@ -738,7 +738,7 @@ impl McpHandler {
                 if deleted {
                     // Remove from in-memory cache
                     self.remove_crate_from_available(&args.crate_name).await;
-                    
+
                     let response = serde_json::json!({
                         "success": true,
                         "message": format!("Removed crate configuration for {} ({})", args.crate_name, version_spec)
@@ -1269,7 +1269,7 @@ async fn main() -> Result<(), ServerError> {
 
     // Create the MCP handler with database access (use available crates for queries)
     let handler = McpHandler::new(db, available_crates, startup_message);
-    
+
     // Refresh the available crates cache from the database to include any recently added crates
     info!("🔄 Refreshing available crates cache from database...");
     handler.refresh_available_crates().await?;
