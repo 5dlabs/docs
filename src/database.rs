@@ -71,6 +71,22 @@ impl Database {
         Ok(exists)
     }
 
+    /// Get all crates that have embeddings
+    pub async fn get_all_crates_with_embeddings(&self) -> Result<Vec<String>, ServerError> {
+        let rows = sqlx::query(
+            r#"
+            SELECT DISTINCT crate_name FROM doc_embeddings
+            ORDER BY crate_name
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| ServerError::Database(format!("Failed to get crates with embeddings: {e}")))?;
+
+        let crates: Vec<String> = rows.iter().map(|row| row.get("crate_name")).collect();
+        Ok(crates)
+    }
+
     /// Insert a document embedding
     pub async fn insert_embedding(
         &self,

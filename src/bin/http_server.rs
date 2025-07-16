@@ -87,17 +87,45 @@ struct Cli {
 #[allow(dead_code)] // Fields are used in async trait implementations
 struct McpHandler {
     database: Database,
-    available_crates: Arc<Vec<String>>,
+    available_crates: Arc<tokio::sync::RwLock<std::collections::HashSet<String>>>,
     startup_message: String,
 }
 
 impl McpHandler {
     fn new(database: Database, available_crates: Vec<String>, startup_message: String) -> Self {
+        let crates_set: std::collections::HashSet<String> = available_crates.into_iter().collect();
         Self {
             database,
-            available_crates: Arc::new(available_crates),
+            available_crates: Arc::new(tokio::sync::RwLock::new(crates_set)),
             startup_message,
         }
+    }
+
+    /// Refresh the available crates cache from the database
+    async fn refresh_available_crates(&self) -> Result<(), ServerError> {
+        let all_crates = self.database.get_all_crates_with_embeddings().await?;
+        let mut crates = self.available_crates.write().await;
+        crates.clear();
+        crates.extend(all_crates);
+        Ok(())
+    }
+
+    /// Add a crate to the available crates cache
+    async fn add_crate_to_available(&self, crate_name: &str) {
+        let mut crates = self.available_crates.write().await;
+        crates.insert(crate_name.to_string());
+    }
+
+    /// Check if a crate is available (fast in-memory lookup)
+    async fn is_crate_available(&self, crate_name: &str) -> bool {
+        let crates = self.available_crates.read().await;
+        crates.contains(crate_name)
+    }
+
+    /// Remove a crate from the available crates cache
+    async fn remove_crate_from_available(&self, crate_name: &str) {
+        let mut crates = self.available_crates.write().await;
+        crates.remove(crate_name);
     }
 
     fn _create_resource_text(&self, uri: &str, name: &str) -> Resource {
@@ -431,20 +459,15 @@ impl McpHandler {
         &self,
         #[tool(aggr)] args: QueryRustDocsArgs,
     ) -> Result<CallToolResult, McpError> {
-        // Check if crate is available (hybrid approach: static list + database fallback)
-        let is_available = self.available_crates.contains(&args.crate_name)
-            || self
-                .database
-                .has_embeddings(&args.crate_name)
-                .await
-                .map_err(|e| McpError::internal_error(e.to_string(), None))?;
-
-        if !is_available {
+        // Check if crate is available (fast in-memory lookup)
+        if !self.is_crate_available(&args.crate_name).await {
+            let crates = self.available_crates.read().await;
+            let available_list: Vec<String> = crates.iter().cloned().collect();
             return Err(McpError::invalid_params(
                 format!(
                     "Crate '{}' not available. Available crates: {}",
                     args.crate_name,
-                    self.available_crates.join(", ")
+                    available_list.join(", ")
                 ),
                 None,
             ));
@@ -571,6 +594,8 @@ impl McpHandler {
                 tokio::spawn(async move {
                     match handler_clone.populate_crate(&crate_name, &features).await {
                         Ok(_) => {
+                            // Add the crate to the in-memory cache after successful population
+                            handler_clone.add_crate_to_available(&crate_name).await;
                             eprintln!("✅ Background population completed for crate: {crate_name}");
                         }
                         Err(e) => {
@@ -711,6 +736,9 @@ impl McpHandler {
         {
             Ok(deleted) => {
                 if deleted {
+                    // Remove from in-memory cache
+                    self.remove_crate_from_available(&args.crate_name).await;
+                    
                     let response = serde_json::json!({
                         "success": true,
                         "message": format!("Removed crate configuration for {} ({})", args.crate_name, version_spec)
@@ -802,6 +830,8 @@ impl McpHandler {
                             tokio::spawn(async move {
                                 match handler_clone.populate_crate(&crate_name, &features).await {
                                     Ok(_) => {
+                                        // Add the crate to the in-memory cache after successful population
+                                        handler_clone.add_crate_to_available(&crate_name).await;
                                         eprintln!("✅ Background population completed for crate: {crate_name}");
                                     }
                                     Err(e) => {
@@ -1239,6 +1269,11 @@ async fn main() -> Result<(), ServerError> {
 
     // Create the MCP handler with database access (use available crates for queries)
     let handler = McpHandler::new(db, available_crates, startup_message);
+    
+    // Refresh the available crates cache from the database to include any recently added crates
+    info!("🔄 Refreshing available crates cache from database...");
+    handler.refresh_available_crates().await?;
+    info!("✅ Available crates cache refreshed");
 
     // Create SSE server config
     let host = &cli.host;
