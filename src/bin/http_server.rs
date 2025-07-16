@@ -27,9 +27,15 @@ use rustdocs_mcp_server::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::{convert::Infallible, env, net::SocketAddr, sync::Arc, time::{Duration, Instant}};
+use std::{
+    convert::Infallible,
+    env,
+    net::SocketAddr,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use tokio_util::sync::CancellationToken;
-use tracing::{info, warn, error};
+use tracing::{error, info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 /// Configuration for MCP connection resilience
@@ -127,40 +133,42 @@ async fn handle_mcp_connection_with_resilience(
     connection_id: String,
 ) -> Result<(), ServerError> {
     let start_time = Instant::now();
-    
+
     if config.verbose_logging {
         info!("🔄 Starting MCP connection initialization (ID: {connection_id})");
     }
-    
+
     // Try to establish the connection with extended timeout
     let connection_id_clone = connection_id.clone();
-    let connection_result = tokio::time::timeout(
-        config.initialize_timeout,
-        async move {
-            match handler.serve(transport).await {
-                Ok(service) => {
-                    if config.verbose_logging {
-                        info!("✅ MCP service initialized successfully (ID: {connection_id_clone})");
-                    }
-                    
-                    // Run the service with enhanced error handling
-                    if let Err(e) = service.waiting().await {
-                        error!("❌ MCP service runtime error (ID: {connection_id_clone}): {e}");
-                        return Err(ServerError::Internal(format!("MCP service runtime error: {e}")));
-                    }
-                    
-                    Ok(())
+    let connection_result = tokio::time::timeout(config.initialize_timeout, async move {
+        match handler.serve(transport).await {
+            Ok(service) => {
+                if config.verbose_logging {
+                    info!("✅ MCP service initialized successfully (ID: {connection_id_clone})");
                 }
-                Err(e) => {
-                    if config.verbose_logging {
-                        warn!("⚠️  MCP service initialization failed (ID: {connection_id_clone}): {e}");
-                    }
-                    Err(ServerError::Internal(format!("MCP service initialization failed: {e}")))
+
+                // Run the service with enhanced error handling
+                if let Err(e) = service.waiting().await {
+                    error!("❌ MCP service runtime error (ID: {connection_id_clone}): {e}");
+                    return Err(ServerError::Internal(format!(
+                        "MCP service runtime error: {e}"
+                    )));
                 }
+
+                Ok(())
+            }
+            Err(e) => {
+                if config.verbose_logging {
+                    warn!("⚠️  MCP service initialization failed (ID: {connection_id_clone}): {e}");
+                }
+                Err(ServerError::Internal(format!(
+                    "MCP service initialization failed: {e}"
+                )))
             }
         }
-    ).await;
-    
+    })
+    .await;
+
     match connection_result {
         Ok(Ok(())) => {
             // Success!
@@ -178,7 +186,9 @@ async fn handle_mcp_connection_with_resilience(
             // Timeout
             let total_time = start_time.elapsed();
             error!("⏱️  MCP connection timed out after {total_time:?} (ID: {connection_id})");
-            Err(ServerError::Internal(format!("MCP connection timeout after {total_time:?}")))
+            Err(ServerError::Internal(format!(
+                "MCP connection timeout after {total_time:?}"
+            )))
         }
     }
 }
@@ -1396,19 +1406,21 @@ async fn main() -> Result<(), ServerError> {
 
     // Initialize connection configuration with enhanced resilience
     let connection_config = McpConnectionConfig::default();
-    info!("⚙️  MCP connection config: timeout={:?}, max_retries={}, retry_delay={:?}", 
-          connection_config.initialize_timeout, 
-          connection_config.max_retries, 
-          connection_config.retry_base_delay);
+    info!(
+        "⚙️  MCP connection config: timeout={:?}, max_retries={}, retry_delay={:?}",
+        connection_config.initialize_timeout,
+        connection_config.max_retries,
+        connection_config.retry_base_delay
+    );
 
     // Handle incoming transports with enhanced resilience
     let mut connection_counter = 0;
     while let Some(transport) = sse_server.next_transport().await {
         connection_counter += 1;
         let connection_id = format!("conn-{connection_counter}");
-        
+
         info!("🔗 New MCP connection received (ID: {connection_id})");
-        
+
         let handler_clone = handler.clone();
         let config_clone = connection_config.clone();
         let conn_id_clone = connection_id.clone();
@@ -1419,7 +1431,9 @@ async fn main() -> Result<(), ServerError> {
                 transport,
                 config_clone,
                 conn_id_clone,
-            ).await {
+            )
+            .await
+            {
                 error!("🚨 MCP connection handling failed: {e}");
             }
         });
