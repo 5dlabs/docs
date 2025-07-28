@@ -1043,7 +1043,9 @@ fn create_health_handler(
             (&Method::GET, "/health/ready") => {
                 // Readiness: Check if all initialization is complete
                 if readiness_state.is_ready() {
-                    let auto_population_complete = readiness_state.auto_population_complete.load(Ordering::Relaxed);
+                    let auto_population_complete = readiness_state
+                        .auto_population_complete
+                        .load(Ordering::Relaxed);
                     let response = Response::builder()
                         .status(StatusCode::OK)
                         .header("Content-Type", "application/json")
