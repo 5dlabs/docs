@@ -83,9 +83,10 @@ impl ReadinessState {
     }
 
     fn is_ready(&self) -> bool {
+        // Server is ready as soon as database and embeddings are initialized
+        // Auto-population can run in background without blocking readiness
         self.database_connected.load(Ordering::Relaxed)
             && self.embedding_initialized.load(Ordering::Relaxed)
-            && self.auto_population_complete.load(Ordering::Relaxed)
     }
 }
 
@@ -1042,10 +1043,14 @@ fn create_health_handler(
             (&Method::GET, "/health/ready") => {
                 // Readiness: Check if all initialization is complete
                 if readiness_state.is_ready() {
+                    let auto_population_complete = readiness_state.auto_population_complete.load(Ordering::Relaxed);
                     let response = Response::builder()
                         .status(StatusCode::OK)
                         .header("Content-Type", "application/json")
-                        .body(r#"{"status":"ready","service":"rustdocs-mcp-server"}"#.to_string())
+                        .body(format!(
+                            r#"{{"status":"ready","service":"rustdocs-mcp-server","auto_population_complete":{}}}"#,
+                            auto_population_complete
+                        ))
                         .unwrap();
                     Ok(response)
                 } else {
