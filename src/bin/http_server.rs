@@ -296,6 +296,10 @@ impl McpHandler {
                     "🧠 Generating embeddings for {} documents...",
                     documents.len()
                 );
+                
+                // Yield before heavy embedding operation
+                tokio::task::yield_now().await;
+                
                 let embedding_start = std::time::Instant::now();
                 let (embeddings, total_tokens) = generate_embeddings(&documents).await?;
                 let embedding_time = embedding_start.elapsed();
@@ -1240,8 +1244,8 @@ async fn main() -> Result<(), ServerError> {
         .store(true, Ordering::Relaxed);
     info!("✅ {provider_name} embedding provider initialized");
 
-    // TEMPORARILY DISABLE: Auto-populate missing crates during startup
-    if false && !missing_crates.is_empty() {
+    // Auto-populate missing crates during startup (with resource management)
+    if !missing_crates.is_empty() {
         info!(
             "🚀 Starting automatic population for {} missing crates: {:?}",
             missing_crates.len(),
@@ -1262,6 +1266,9 @@ async fn main() -> Result<(), ServerError> {
 
                 // Create a temporary handler to use the populate function
                 let temp_handler = McpHandler::new(db.clone(), vec![], String::new());
+
+                // Yield to allow MCP connections to be processed
+                tokio::task::yield_now().await;
 
                 match temp_handler
                     .populate_crate(&config.name, &config.features)
@@ -1284,6 +1291,9 @@ async fn main() -> Result<(), ServerError> {
                         failed_crates.push(config.name.clone());
                     }
                 }
+
+                // Small delay between crate populations to prevent resource starvation
+                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
             }
         }
 
