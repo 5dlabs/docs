@@ -83,9 +83,10 @@ impl ReadinessState {
     }
 
     fn is_ready(&self) -> bool {
+        // Server is ready as soon as database and embeddings are initialized
+        // Auto-population can run in background without blocking readiness
         self.database_connected.load(Ordering::Relaxed)
             && self.embedding_initialized.load(Ordering::Relaxed)
-            && self.auto_population_complete.load(Ordering::Relaxed)
     }
 }
 
