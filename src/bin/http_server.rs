@@ -1421,21 +1421,30 @@ async fn main() -> Result<(), ServerError> {
         let connection_id = format!("conn-{connection_counter}");
 
         info!("🔗 New MCP connection received (ID: {connection_id})");
+        info!("📊 Total active connections: {connection_counter}");
 
         let handler_clone = handler.clone();
         let config_clone = connection_config.clone();
         let conn_id_clone = connection_id.clone();
 
         tokio::spawn(async move {
-            if let Err(e) = handle_mcp_connection_with_resilience(
+            let start_time = std::time::Instant::now();
+            match handle_mcp_connection_with_resilience(
                 handler_clone,
                 transport,
                 config_clone,
-                conn_id_clone,
+                conn_id_clone.clone(),
             )
             .await
             {
-                error!("🚨 MCP connection handling failed: {e}");
+                Ok(()) => {
+                    let duration = start_time.elapsed();
+                    info!("✅ MCP connection closed gracefully (ID: {conn_id_clone}, duration: {duration:?})");
+                }
+                Err(e) => {
+                    let duration = start_time.elapsed();
+                    error!("🚨 MCP connection failed (ID: {conn_id_clone}, duration: {duration:?}): {e}");
+                }
             }
         });
     }
