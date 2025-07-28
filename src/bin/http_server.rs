@@ -1372,7 +1372,8 @@ async fn main() -> Result<(), ServerError> {
                             );
 
                             // Create a temporary handler to use the populate function
-                            let temp_handler = McpHandler::new(db_clone.clone(), vec![], String::new());
+                            let temp_handler =
+                                McpHandler::new(db_clone.clone(), vec![], String::new());
 
                             match temp_handler
                                 .populate_crate(&config.name, &config.features)
