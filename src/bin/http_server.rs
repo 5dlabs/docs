@@ -148,20 +148,8 @@ async fn handle_mcp_connection_with_resilience(
                     info!("✅ MCP service initialized successfully (ID: {connection_id_clone})");
                 }
 
-                // Run the service with enhanced error handling and periodic health checks
+                // Run the service with enhanced error handling
                 info!("🎯 MCP service started successfully (ID: {connection_id_clone})");
-
-                // Start a background task to log connection health periodically
-                let health_connection_id = connection_id_clone.clone();
-                let health_start = start_time;
-                tokio::spawn(async move {
-                    let mut interval = tokio::time::interval(Duration::from_secs(30));
-                    loop {
-                        interval.tick().await;
-                        let uptime = health_start.elapsed();
-                        info!("💓 MCP connection health check (ID: {health_connection_id}, uptime: {uptime:?})");
-                    }
-                });
 
                 if let Err(e) = service.waiting().await {
                     error!("❌ MCP service runtime error (ID: {connection_id_clone}): {e}");
