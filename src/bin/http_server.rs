@@ -57,7 +57,7 @@ struct McpConnectionConfig {
 impl Default for McpConnectionConfig {
     fn default() -> Self {
         Self {
-            initialize_timeout: Duration::from_secs(120), // Increased for slow clients
+            initialize_timeout: Duration::from_secs(30), // Restored to original value
             max_retries: 3,
             retry_base_delay: Duration::from_millis(500),
             retry_max_delay: Duration::from_secs(10),
@@ -83,10 +83,9 @@ impl ReadinessState {
     }
 
     fn is_ready(&self) -> bool {
-        // Server is ready as soon as database and embeddings are initialized
-        // Auto-population can run in background without blocking readiness
         self.database_connected.load(Ordering::Relaxed)
             && self.embedding_initialized.load(Ordering::Relaxed)
+            && self.auto_population_complete.load(Ordering::Relaxed)
     }
 }
 

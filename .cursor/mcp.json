@@ -1,11 +1,7 @@
 {
   "mcpServers": {
     "rust-docs": {
-      "url": "http://rustdocs-mcp-rust-docs-mcp-server.mcp.svc.cluster.local:3000/sse",
-      "env": {
-        "MCP_TIMEOUT": "120000",
-        "MCP_TOOL_TIMEOUT": "180000"
-      }
+      "url": "http://rustdocs-mcp-rust-docs-mcp-server.mcp.svc.cluster.local:3000/sse"
     }
   }
 }
