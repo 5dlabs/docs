@@ -1244,80 +1244,7 @@ async fn main() -> Result<(), ServerError> {
         .store(true, Ordering::Relaxed);
     info!("✅ {provider_name} embedding provider initialized");
 
-    // Auto-populate missing crates during startup (with resource management)
-    if !missing_crates.is_empty() {
-        info!(
-            "🚀 Starting automatic population for {} missing crates: {:?}",
-            missing_crates.len(),
-            missing_crates
-        );
-
-        // Get crate configurations for missing crates
-        let all_configs = db.get_crate_configs(true).await?; // Only enabled crates
-        let mut populated_crates = Vec::new();
-        let mut failed_crates = Vec::new();
-
-        for crate_name in &missing_crates {
-            if let Some(config) = all_configs.iter().find(|c| &c.name == crate_name) {
-                info!(
-                    "📦 Auto-populating crate: {} with features: {:?}",
-                    config.name, config.features
-                );
-
-                // Create a temporary handler to use the populate function
-                let temp_handler = McpHandler::new(db.clone(), vec![], String::new());
-
-                // Yield to allow MCP connections to be processed
-                tokio::task::yield_now().await;
-
-                match temp_handler
-                    .populate_crate(&config.name, &config.features)
-                    .await
-                {
-                    Ok(stats) => {
-                        info!("✅ Successfully auto-populated crate: {}", config.name);
-                        info!(
-                            "   📊 Stats: {} documents, {} embeddings",
-                            stats["documents_loaded"], stats["embeddings_generated"]
-                        );
-                        populated_crates.push(config.name.clone());
-                        available_crates.push(config.name.clone());
-                    }
-                    Err(e) => {
-                        warn!(
-                            "❌ Failed to auto-populate crate: {} - Error: {}",
-                            config.name, e
-                        );
-                        failed_crates.push(config.name.clone());
-                    }
-                }
-
-                // Small delay between crate populations to prevent resource starvation
-                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-            }
-        }
-
-        // Update missing_crates to only include those that failed
-        missing_crates = failed_crates;
-
-        if !populated_crates.is_empty() {
-            info!(
-                "🎉 Auto-population complete! Successfully populated {} crates: {:?}",
-                populated_crates.len(),
-                populated_crates
-            );
-        }
-
-        if !missing_crates.is_empty() {
-            warn!(
-                "⚠️  {} crates still not populated: {:?}. Use MCP tools to retry.",
-                missing_crates.len(),
-                missing_crates
-            );
-        }
-    } else {
-        info!("✅ No missing crates - auto-population not needed");
-    }
+    // Note: Auto-population will run after SSE server starts to avoid blocking connections
 
     // Mark auto-population as complete (whether successful or not)
     readiness_state
@@ -1389,7 +1316,7 @@ async fn main() -> Result<(), ServerError> {
     info!("✅ {startup_message}");
 
     // Create the MCP handler with database access (use available crates for queries)
-    let handler = McpHandler::new(db, available_crates, startup_message);
+    let handler = McpHandler::new(db.clone(), available_crates, startup_message);
 
     // Refresh the available crates cache from the database to include any recently added crates
     info!("🔄 Refreshing available crates cache from database...");
@@ -1422,6 +1349,64 @@ async fn main() -> Result<(), ServerError> {
 
     info!("🔧 Server-Sent Events transport ready");
     info!("🎯 MCP server waiting for connections...");
+
+    // Start auto-population in background AFTER server is ready for connections
+    if !missing_crates.is_empty() {
+        let db_clone = db.clone();
+        let missing_crates_clone = missing_crates.clone();
+        tokio::spawn(async move {
+            info!(
+                "🚀 Starting background auto-population for {} missing crates: {:?}",
+                missing_crates_clone.len(),
+                missing_crates_clone
+            );
+
+            // Get crate configurations for missing crates
+            match db_clone.get_crate_configs(true).await {
+                Ok(all_configs) => {
+                    for crate_name in &missing_crates_clone {
+                        if let Some(config) = all_configs.iter().find(|c| &c.name == crate_name) {
+                            info!(
+                                "📦 Auto-populating crate: {} with features: {:?}",
+                                config.name, config.features
+                            );
+
+                            // Create a temporary handler to use the populate function
+                            let temp_handler = McpHandler::new(db_clone.clone(), vec![], String::new());
+
+                            match temp_handler
+                                .populate_crate(&config.name, &config.features)
+                                .await
+                            {
+                                Ok(stats) => {
+                                    info!("✅ Successfully auto-populated crate: {}", config.name);
+                                    info!(
+                                        "   📊 Stats: {} documents, {} embeddings",
+                                        stats["documents_loaded"], stats["embeddings_generated"]
+                                    );
+                                }
+                                Err(e) => {
+                                    warn!(
+                                        "❌ Failed to auto-populate crate: {} - Error: {}",
+                                        config.name, e
+                                    );
+                                }
+                            }
+
+                            // Small delay between crate populations to prevent resource starvation
+                            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                        }
+                    }
+                    info!("🎉 Background auto-population complete!");
+                }
+                Err(e) => {
+                    warn!("❌ Failed to get crate configs for auto-population: {}", e);
+                }
+            }
+        });
+    } else {
+        info!("✅ No missing crates - auto-population not needed");
+    }
 
     // Initialize connection configuration with enhanced resilience
     let connection_config = McpConnectionConfig::default();
