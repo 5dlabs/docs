@@ -150,7 +150,7 @@ async fn handle_mcp_connection_with_resilience(
 
                 // Run the service with enhanced error handling and periodic health checks
                 info!("🎯 MCP service started successfully (ID: {connection_id_clone})");
-                
+
                 // Start a background task to log connection health periodically
                 let health_connection_id = connection_id_clone.clone();
                 let health_start = start_time;
@@ -162,7 +162,7 @@ async fn handle_mcp_connection_with_resilience(
                         info!("💓 MCP connection health check (ID: {health_connection_id}, uptime: {uptime:?})");
                     }
                 });
-                
+
                 if let Err(e) = service.waiting().await {
                     error!("❌ MCP service runtime error (ID: {connection_id_clone}): {e}");
                     return Err(ServerError::Internal(format!(
@@ -1064,8 +1064,7 @@ fn create_health_handler(
                         .status(StatusCode::OK)
                         .header("Content-Type", "application/json")
                         .body(format!(
-                            r#"{{"status":"ready","service":"rustdocs-mcp-server","auto_population_complete":{}}}"#,
-                            auto_population_complete
+                            r#"{{"status":"ready","service":"rustdocs-mcp-server","auto_population_complete":{auto_population_complete}}}"#
                         ))
                         .unwrap();
                     Ok(response)
