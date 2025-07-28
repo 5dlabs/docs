@@ -3,7 +3,7 @@ use ndarray::Array1;
 use pgvector::Vector;
 use serde::{Deserialize, Serialize};
 use sqlx::{postgres::PgPoolOptions, PgPool, Row};
-use std::env;
+use std::{env, time::Duration};
 
 #[derive(Clone)]
 pub struct Database {
@@ -18,7 +18,10 @@ impl Database {
         });
 
         let pool = PgPoolOptions::new()
-            .max_connections(5)
+            .max_connections(10)  // Increased from 5
+            .idle_timeout(Duration::from_secs(300))     // Close idle after 5min
+            .max_lifetime(Duration::from_secs(1800))    // Refresh after 30min
+            .acquire_timeout(Duration::from_secs(30))   // Timeout waiting for connection
             .connect(&database_url)
             .await
             .map_err(|e| ServerError::Database(format!("Failed to connect to database: {e}")))?;

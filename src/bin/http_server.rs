@@ -57,7 +57,7 @@ struct McpConnectionConfig {
 impl Default for McpConnectionConfig {
     fn default() -> Self {
         Self {
-            initialize_timeout: Duration::from_secs(30), // Increased from ~5s default
+            initialize_timeout: Duration::from_secs(120), // Increased for slow clients
             max_retries: 3,
             retry_base_delay: Duration::from_millis(500),
             retry_max_delay: Duration::from_secs(10),

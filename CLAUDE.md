@@ -3,6 +3,24 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with
 code in this repository.
 
+## Quick Start for Development
+
+Run these commands to get started with local development:
+
+```bash
+# Setup database with pgvector
+createdb rust_docs_vectors
+psql rust_docs_vectors -c "CREATE EXTENSION IF NOT EXISTS vector;"
+psql rust_docs_vectors < sql/schema.sql
+
+# Set required environment variables
+export MCPDOCS_DATABASE_URL="postgresql://username@localhost/rust_docs_vectors"
+export OPENAI_API_KEY="sk-..."
+
+# Run HTTP server for development
+cargo run --bin rustdocs_mcp_server_http -- --all
+```
+
 ## Project Overview
 
 This is a Rust-based MCP (Model Context Protocol) server that provides AI
@@ -34,8 +52,15 @@ cargo fmt --all
 # Build the project
 cargo build --release
 
+# Build specific binary targets
+cargo build --release --bin rustdocs_mcp_server_http
+cargo build --release --bin populate_db
+
 # Run tests
 cargo test
+
+# Run specific test
+cargo test test_search
 
 # Check for compilation errors
 cargo check --all-targets --all-features
@@ -124,6 +149,15 @@ kubectl port-forward -n mcp service/rustdocs-mcp-rust-docs-mcp-server 3000:3000
 - Docker image: Copied as `http_server`
 - Helm deployment: Uses `command: ["http_server"]`
 
+### Key Binary Files
+
+- `src/main.rs`: Stdio MCP server (single-user)
+- `src/bin/http_server.rs`: HTTP MCP server (production)
+- `src/bin/populate_db.rs`: Single crate population tool
+- `src/bin/populate_all.rs`: Bulk crate population
+- `src/bin/backfill_versions.rs`: Version backfill utility
+- `src/bin/migrate_config.rs`: Config migration from old format
+
 ### Environment Variables
 
 - `MCPDOCS_DATABASE_URL`: PostgreSQL connection string
@@ -171,7 +205,36 @@ kubectl port-forward -n mcp service/rustdocs-mcp-rust-docs-mcp-server 3000:3000
 ## Development Notes
 
 - All async code uses Tokio runtime
-- Error handling with custom `ServerError` type
-- MCP implementation uses `rmcp` crate
+- Error handling with custom `ServerError` type (`src/error.rs`)
+- MCP implementation uses `rmcp` crate with SSE transport for HTTP server
 - Release builds optimized with LTO, strip, and panic=abort
 - Database operations use SQLx with compile-time query verification
+- Vector embeddings use 3072-dimensional OpenAI text-embedding-3-large model
+- Database uses pgvector extension for similarity search with IVFFlat indexing
+
+### MCP Server Architecture
+
+The codebase implements two MCP servers that share the same core logic:
+
+1. **HTTP Server** (`src/bin/http_server.rs`): Production server using SSE transport
+   - Runs on port 3000 by default
+   - Handles concurrent MCP clients
+   - Used by Cursor IDE and other HTTP-based MCP clients
+
+2. **Stdio Server** (`src/main.rs`): Single-user server using stdio transport
+   - Direct stdin/stdout communication
+   - Simpler deployment for single-user scenarios
+
+Both servers expose identical MCP tools defined in `src/server.rs`:
+- `query_rust_docs`: Vector search across documentation
+- `add_crate`: Configure and populate new crates
+- `list_crates`: List available crates
+- `remove_crate`: Remove crate configurations
+- `check_crate_status`: Check population status
+
+### Core Data Flow
+
+1. **Document Processing**: `doc_loader.rs` parses HTML from docs.rs
+2. **Embedding Generation**: `embeddings.rs` creates vectors via OpenAI/Voyage APIs
+3. **Database Storage**: `database.rs` handles PostgreSQL operations with pgvector
+4. **Search**: Vector similarity search with LLM summarization via OpenAI
