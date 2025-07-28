@@ -1240,8 +1240,8 @@ async fn main() -> Result<(), ServerError> {
         .store(true, Ordering::Relaxed);
     info!("✅ {provider_name} embedding provider initialized");
 
-    // Auto-populate missing crates during startup
-    if !missing_crates.is_empty() {
+    // TEMPORARILY DISABLE: Auto-populate missing crates during startup
+    if false && !missing_crates.is_empty() {
         info!(
             "🚀 Starting automatic population for {} missing crates: {:?}",
             missing_crates.len(),
