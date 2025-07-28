@@ -296,10 +296,10 @@ impl McpHandler {
                     "🧠 Generating embeddings for {} documents...",
                     documents.len()
                 );
-                
+
                 // Yield before heavy embedding operation
                 tokio::task::yield_now().await;
-                
+
                 let embedding_start = std::time::Instant::now();
                 let (embeddings, total_tokens) = generate_embeddings(&documents).await?;
                 let embedding_time = embedding_start.elapsed();
