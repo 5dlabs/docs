@@ -246,7 +246,8 @@ impl McpHandler {
         let features = features.to_vec();
         let database = self.database.clone();
 
-        // Run population in a blocking task to handle non-Send types
+        // Run population in a blocking task to handle non-Send scraper types
+        // Use a dedicated thread pool to avoid blocking the main runtime
         let result = tokio::task::spawn_blocking(move || {
             tokio::runtime::Handle::current().block_on(async {
                 let total_start = std::time::Instant::now();
